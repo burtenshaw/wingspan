@@ -1,0 +1,6 @@
+data
+tryouts
+bert_base_uncased
+.vscode
+.virtual_documents
+__pycache__
