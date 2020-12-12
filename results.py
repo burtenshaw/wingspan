@@ -6,7 +6,7 @@ from utils import *
 
 class EvalResults:
 
-    def __init__(self, results, y_test, roc=False, bin_t=0.5, do_labels=False):
+    def __init__(self, results, y_test, roc=False, bin_t=0.5, do_labels=False, token_type='char'):
 
         rdf = pd.concat([pd.DataFrame(results),pd.DataFrame(y_test)], \
                     keys=['pred', 'true'], axis=1)
@@ -24,16 +24,24 @@ class EvalResults:
         else:
             rdf.pred = rdf.pred.apply(lambda col : np.where(col > bin_t, 1, 0 ))
         
-    
-        rdf['pred'] = rdf.pred.apply(mask_to_entities, axis=1, result_type='expand')
-        rdf['true'] = rdf.true.apply(mask_to_entities, axis=1, result_type='expand')
-
+        if token_type == 'char':
+            rdf['pred'] = rdf.pred.apply(character_mask_to_entities, axis=1, result_type='expand')
+            rdf['true'] = rdf.true.apply(character_mask_to_entities, axis=1, result_type='expand')
+        elif token_type == 'word':
+            rdf['pred'] = rdf.pred.apply(word_mask_to_character_entity, result_shape=results.shape[1]\
+                , axis=1, result_type='expand')
+            rdf['true'] = rdf.true.apply(word_mask_to_character_entity, result_shape=results.shape[1]\
+                , axis=1, result_type='expand')
+        
         self.rdf = rdf
         self.evdf = pd.DataFrame()
 
-        self.evdf['f1'] = rdf.apply(lambda row : f1(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
-        self.evdf['precision'] = rdf.apply(lambda row : precision(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
-        self.evdf['recall'] = rdf.apply(lambda row : recall(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
+        self.evdf['f1'] = rdf.apply(lambda row : \
+            f1(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
+        self.evdf['precision'] = rdf.apply(lambda row : \
+            precision(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
+        self.evdf['recall'] = rdf.apply(lambda row : \
+            recall(row.pred[row.pred != 0 ], row.true[row.true != 0]), axis=1)
         self.mean = self.evdf.mean()
 
         if do_labels:

@@ -6,6 +6,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassification
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import AUC
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 import tensorflow_hub as hub
 from tensorflow.keras.layers import Layer
@@ -20,6 +21,19 @@ import io
 tf.config.list_physical_devices(device_type='GPU')
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
 from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
+
+def prep_data(data, field):
+
+    max_tags = data[field].apply(len).max()
+
+    X = data.text.values
+    y = pad_sequences(data[field], padding='post', maxlen=max_tags, value=0.0)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=2018)
+
+    X_mask,X_ids = bert_prep(X_train, max_len=200)
+
+    return X_train, X_test, y_train, y_test, X_mask, X_ids, max_tags
 
 
 def bert_prep(text, max_len=128):
@@ -67,6 +81,7 @@ def build_bert(input_dim = 200, output_dim=6, dropout=0.2):
                   metrics = [ auc_score])
     return model
 
+
 def load_vec(emb_path_list, nmax=50000):
     words = []
     embeddings_index = {}
@@ -94,7 +109,6 @@ def muse_embedding(X_train):
     vectorizer = TextVectorization(max_tokens=80000, output_sequence_length=200)
     text_ds = tf.data.Dataset.from_tensor_slices(list(X_train) + words).batch(128)
     vectorizer.adapt(text_ds)
-
 
     voc = vectorizer.get_vocabulary()
     word_index = dict(zip(voc, range(len(voc))))

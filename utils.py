@@ -1,13 +1,12 @@
 import numpy as np
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from string import punctuation
 from models import bert_prep
 from sklearn.model_selection import train_test_split
-
+import itertools
 
 # PREPROCESSING / MANIPULATION
 
-def word_mask_to_character_entity(row):
+def word_mask_to_character_entity(row, result_shape=200, pad = True):
     """
     Get the offsets of the toxic spans
     WARNING: Valid only for empty space tokenisation.
@@ -19,8 +18,34 @@ def word_mask_to_character_entity(row):
         if row.word_mask[n] == 1:
             toxic_offsets.extend(list(range(current_offset, current_offset+len(word))))
         current_offset += len(word) + 1
+    if pad:
+        mask = np.array(row.word_mask)
+        toxic_offsets = np.pad(mask, (0, result_shape-mask.shape[0]))
     return toxic_offsets
 
+def word_mask_to_spans(row):
+    """
+    Replication of the above. could be used to improve parsin accuracy
+    """
+
+    cont_ranges = []
+    prev_char_pos = 0
+    prev_binary = mask[0]
+    for n, span in itertools.groupby(zip(row.mask, row.tokens), lambda p: len(p[1]) - p[0]):
+        now_binary, word = list(span)[0]
+        now_char_pos = len(word) + 1 + prev_char_pos
+
+        if prev_binary == 0 and now_binary == 1:
+            cont_ranges.extend(range(prev_char_pos, now_char_pos))
+            on_span = n
+        
+        elif prev_binary == 1 and now_binary == 1:
+            cont_ranges.extend(range(prev_char_pos - (n-on_span), now_char_pos - 1))
+
+        prev_binary = now_binary
+        prev_char_pos = now_char_pos
+
+    return cont_ranges
 
 def contiguous_ranges(span_list, flatten=False):
     """Extracts continguous runs [1, 2, 3, 5, 6, 7] -> [(1,3), (5,7)].
@@ -57,24 +82,20 @@ def make_word_mask(row):
 
     return tags 
 
-def mask_to_entities(target_mask):
+def character_mask_to_entities(target_mask):
     return np.where(np.array(target_mask) == 1)[0]
 
+def pad_mask(mask, max_len = 200):
+    return np.pad(mask, (0,max_len - mask.shape[0]))
 
-# training  
+def pad_limit_mask(mask):
+    return np.vstack(data[mask].apply(np.array).apply(pad_mask,\
+        max_len = data[mask].apply(len).max()).apply(lambda x : x[:20]).values)
 
-def prep_data(data, field):
-
-    max_tags = data[field].apply(len).max()
-
-    X = data.text.values
-    y = pad_sequences(data[field], padding='post', maxlen=max_tags, value=0.0)
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=2018)
-
-    X_mask,X_ids = bert_prep(X_train, max_len=200)
-
-    return X_train, X_test, y_train, y_test, X_mask, X_ids, max_tags
+def make_word_level_df(train):
+    return train[['text', 'tuples']].explode('tuples').apply(\
+        lambda x : {'text' : x.text, 'word' : x.tuples[0], 'label' : x.tuples[1]},\
+        result_type = 'expand', axis = 1)
 
 # eval
 
