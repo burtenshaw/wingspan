@@ -6,7 +6,7 @@ import itertools
 
 # PREPROCESSING / MANIPULATION
 
-def word_mask_to_character_entity(row, result_shape=200, pad = True):
+def word_mask_to_character_entity(row, field = 'word_mask', result_shape=200, pad = True):
     """
     Get the offsets of the toxic spans
     WARNING: Valid only for empty space tokenisation.
@@ -14,12 +14,14 @@ def word_mask_to_character_entity(row, result_shape=200, pad = True):
     """
     current_offset = 0
     toxic_offsets = []
+    if type(row.text) != str:
+        row.text = row.text.apply(lambda x : x[0])
     for n, word in enumerate(row.text.split(' ')):
-        if row.word_mask[n] == 1:
+        if row[field][n] == 1:
             toxic_offsets.extend(list(range(current_offset, current_offset+len(word))))
         current_offset += len(word) + 1
     if pad:
-        mask = np.array(row.word_mask)
+        mask = np.array(toxic_offsets)
         toxic_offsets = np.pad(mask, (0, result_shape-mask.shape[0]))
     return toxic_offsets
 
@@ -133,3 +135,17 @@ def f1(predictions, gold):
     denom = len(set(predictions))+len(set(gold))
     return nom/denom
 
+def pairwise_operator(codes, method):
+    """
+    Pairwsise operator based on a method and a list of predictions (e.g., lists of offsets)
+    >>> assert pairwise_operator([[],[],[]], f1) == 1
+    :param codes: a list of lists of predicted offsets
+    :param method: a method to use to compare all pairs
+    :return: the mean score between all possible pairs (excl. duplicates)
+    """
+    pairs = []
+    for i,coderi in enumerate(codes):
+        for j,coderj in enumerate(codes):
+            if j>i:
+                pairs.append(method(coderi, coderj))
+    return np.mean(pairs)
