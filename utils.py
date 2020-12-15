@@ -4,6 +4,8 @@ from models import bert_prep
 from sklearn.model_selection import train_test_split
 import itertools
 
+from tensorflow.keras.utils import to_categorical
+
 # PREPROCESSING / MANIPULATION
 
 def word_mask_to_character_entity(row, field = 'word_mask', result_shape=200, pad = True):
@@ -88,22 +90,25 @@ def character_mask_to_entities(target_mask):
     return np.where(np.array(target_mask) == 1)[0]
 
 def pad_mask(mask, max_len = 200):
+    mask = mask[:max_len]
     return np.pad(mask, (0,max_len - mask.shape[0]))
 
-def pad_limit_mask(mask):
-    return np.vstack(data[mask].apply(np.array).apply(pad_mask,\
-        max_len = data[mask].apply(len).max()).apply(lambda x : x[:20]).values)
-
-def make_word_level_df(train):
-    return train[['text', 'tuples']].explode('tuples').apply(\
-        lambda x : {'text' : x.text, 'word' : x.tuples[0], 'label' : x.tuples[1]},\
-        result_type = 'expand', axis = 1)
-
-# eval
+def word_id_to_mask(word_id, max_len = 200):
+    return pad_mask(to_categorical(word_id), max_len = max_len)
 
 def mask_to_entities(mask):
     mask = np.where(mask.values == 1)[0][:200]
     return np.pad(mask, (0,200-mask.shape[0]))
+
+def make_word_level_df(train, max_len = 200):
+    return train[['text', 'tuples']].explode('tuples').apply(\
+        lambda x : {'text' : x.text, 
+                    'x_word_mask': word_id_to_mask(x.tuples[0], max_len = max_len), 
+                    'word' : x.tuples[1][0], 
+                    'label' : x.tuples[1][1]},\
+        result_type = 'expand', axis = 1)
+
+# eval
 
 # f1 = 2*(Recall * Precision) / (Recall + Precision)
 # def f1(predictions, gold):

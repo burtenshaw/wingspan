@@ -1,8 +1,12 @@
 # to do
 
-- [ ] improve accuracy of word mask back to ranges
-- [ ] use all task specific evaluations
+- [x] improve accuracy of word mask back to ranges
+- [x] use all task specific evaluations
+- [x] try more models
+- [x] try ensemble
+- [x] add lexical
+
 - [ ] add multilabel as embedding
-- [ ] try more models
-- [ ] try ensemble
-- [ ] add lexical
+- [ ] add word chunk prediction; predict if word is toxic based on last 4 word_mask
+- [ ] switch muse embeddings to use
+- [ ] try electra on array prediction

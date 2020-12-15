@@ -33,7 +33,7 @@ from models import *
 
 import string
 import re
-
+from collections import Counter
 
 tf.config.list_physical_devices(device_type='GPU')
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
@@ -62,9 +62,15 @@ bert = hub.load('https://tfhub.dev/google/electra_small/2')
 # sequence_output = bert(bert_inputs)['sequence_output']
 data = make_word_level_df(data)
 #%%
+batch_size = 20
+vectors = []
+for batch_number, batch_df in data.groupby(np.arange(len(data)) // batch_size):
+    texts = batch_df.text.to_list()
+    vectors.extend(bert(preprocess(texts))['pooled_output'])
+#%%
 
-x_s_train = tf.constant(data.loc[X_train_index].text.to_list())
-x_w_train = tf.constant(data.loc[X_train_index].word.to_list())
+x_s_train = data.loc[X_train_index].text.apply(preprocess).apply(bert).to_list()
+x_w_train = data.loc[X_train_index].word.apply(preprocess).apply(bert).to_list()
 y_train = np.array(data.loc[y_train_index].label)
 
 x_s_val = tf.constant(data.loc[X_val_index].text.to_list())

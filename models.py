@@ -41,20 +41,23 @@ def bert_prep(text, max_len=128):
 
     padded_ids = []
     mask_ids = []
+    attn_ids = []
 
     for i in tqdm(range(len(text))):
         encoding = tokenizer.encode_plus(text[i], 
                                          max_length = max_len, 
                                          truncation=True, 
                                          padding='max_length')
-        input_ids , attention_id = encoding["input_ids"] , encoding["attention_mask"] 
-        padded_ids.append(input_ids)
-        mask_ids.append(attention_id)
         
+        padded_ids.append(encoding["input_ids"])
+        mask_ids.append(encoding['token_type_ids'])
+        attn_ids.append(encoding["attention_mask"])
+
     x_id = np.array(padded_ids)
     x_mask = np.array(mask_ids)
+    x_attn = np.array(attn_ids)
         
-    return x_id, x_mask
+    return x_id, x_mask, x_attn
 
 def build_bert(input_dim = 200, output_dim=6, dropout=0.2):
     
@@ -154,4 +157,41 @@ def build_muse_lstm(embedding_matrix, num_tokens, output_dim=6):
     model = tf.keras.Model(inputs=deep_inputs, outputs=dense_layer_1)
     auc_score = AUC(multi_label=True, curve='PR')
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[auc_score])
+    return model
+
+
+def dual_bert():
+
+    '''
+    https://github.com/cerlymarco/MEDIUM_NoteBook/blob/master/Siamese_Dual_BERT/Siamese_Dual_BERT.ipynb
+    '''
+    
+    opt = Adam(learning_rate=2e-5)
+    
+    id1 = tf.keras.layers.Input((128,), dtype=tf.int32)
+    mask1 = tf.keras.layers.Input((128,), dtype=tf.int32)
+    atn1 = tf.keras.layers.Input((128,), dtype=tf.int32)
+    
+    id2 = tf.keras.layers.Input((1,), dtype=tf.int32)
+    mask2 = tf.keras.layers.Input((1,), dtype=tf.int32)
+    atn2 = tf.keras.layers.Input((1,), dtype=tf.int32)
+    
+    
+    config = BertConfig() 
+    config.output_hidden_states = False # Set to True to obtain hidden states
+    bert_model1 = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    bert_model2 = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    
+    embedding1 = bert_model1(id1, attention_mask=mask1, token_type_ids=atn1)[0]
+    embedding2 = bert_model2(id2, attention_mask=mask2, token_type_ids=atn2)[0]
+    
+    x1 = tf.keras.layers.GlobalAveragePooling1D()(embedding1)
+    x2 = tf.keras.layers.GlobalAveragePooling1D()(embedding2)
+    
+    x = tf.keras.layers.Concatenate()([x1, x2])
+    x = tf.keras.layers.Dense(64, activation='relu')(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    out = tf.keras.layers.Dense(1, activation='sigmoid')(x)
+    
+    model = tf.keras.Model(inputs=[id1, mask1, atn1, id2, mask2, atn2], outputs=out)
     return model
