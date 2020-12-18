@@ -1,39 +1,25 @@
+import pandas as pd
+import numpy as np
+import os
+import io
+from tqdm import *
 import tensorflow as tf
+import tensorflow_hub as hub
+
 from tensorflow import keras as K
 from tensorflow.keras import layers
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import ModelCheckpoint
-from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassification
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import SparseCategoricalCrossentropy
 from tensorflow.keras.metrics import AUC
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-
-import tensorflow_hub as hub
+from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.layers import Layer
-
-import pandas as pd
-import numpy as np
-
-from tqdm import *
-import os
-import io
-
-tf.config.list_physical_devices(device_type='GPU')
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
+from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassification, BertConfig
+from sklearn.model_selection import train_test_split
 
-def prep_data(data, field):
-
-    max_tags = data[field].apply(len).max()
-
-    X = data.text.values
-    y = pad_sequences(data[field], padding='post', maxlen=max_tags, value=0.0)
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=2018)
-
-    X_mask,X_ids = bert_prep(X_train, max_len=200)
-
-    return X_train, X_test, y_train, y_test, X_mask, X_ids, max_tags
 
 
 def bert_prep(text, max_len=128):
@@ -58,6 +44,355 @@ def bert_prep(text, max_len=128):
     x_attn = np.array(attn_ids)
         
     return x_id, x_mask, x_attn
+
+
+def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0): 
+
+    pre_id = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    pre_mask = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    pre_atn = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    
+    post_id = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    post_mask = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    post_atn = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    
+    config = BertConfig() 
+    config.output_hidden_states = False # Set to True to obtain hidden states
+    
+    bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    
+    pre_embedded = bert_model(pre_id, attention_mask=pre_mask, token_type_ids=pre_atn)[0]
+    post_embedded = bert_model(post_id, attention_mask=post_mask, token_type_ids=post_atn)[0]
+    
+    # pre_embedded = tf.keras.layers.GlobalAveragePooling1D()(pre_embedding)
+    # post_embedded = tf.keras.layers.GlobalAveragePooling1D()(post_embedding)
+    
+    merged = tf.keras.layers.concatenate([pre_embedded, post_embedded], axis=1)
+    
+    input_length = pre_length + post_length
+    model_scale = hparams['model_scale']
+
+    layer =  layers.LSTM(input_length*model_scale)(merged)
+
+    for _ in range(hparams['n_layers']):
+        layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
+        layer = tf.keras.layers.Dropout(hparams['dropout'])(layer)
+        model_scale = model_scale / 2
+
+    out = tf.keras.layers.Dense(1, activation='sigmoid')(layer)
+    
+    model = tf.keras.Model(inputs=[pre_id, 
+                                   pre_mask, 
+                                   pre_atn, 
+                                   post_id, 
+                                   post_mask, 
+                                   post_atn], 
+
+                           outputs=out)
+
+    opt = Adam(lr = hparams['lr'])
+
+    model.compile(optimizer = opt, 
+                  loss = 'binary_crossentropy', 
+                  metrics = metrics)
+
+    class_weight = get_class_weights(data['y_train'])
+
+    model.fit(  data['X_train'] , 
+                data['y_train'],
+                batch_size=hparams['batch_size'],
+                validation_data=(data['X_val'], data['y_val']),
+                epochs=hparams['epochs'],
+                verbose = 1,
+                callbacks= callbacks,
+                class_weight = class_weight)
+
+    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+
+    return scores
+
+# used in siamese lstm
+
+def get_embedding_weights(word_index , src_path = '/home/corpora/word_embeddings', embedding = 'glove.6B.100d.txt'):
+
+    embeddings_index = {}
+    f = open(os.path.join(src_path, embedding))
+    for line in f:
+        values = line.split()
+        word = values[0]
+        coefs = np.asarray(values[1:], dtype='float32')
+        embeddings_index[word] = coefs
+    f.close()
+
+    print('Found %s word vectors.' % len(embeddings_index))
+
+    embedding_matrix = np.zeros((len(word_index) + 1, 100))
+    for word, i in word_index.items():
+        embedding_vector = embeddings_index.get(word)
+        if embedding_vector is not None:
+            # words not found in embedding index will be all-zeros.
+            embedding_matrix[i] = embedding_vector
+
+    return embedding_matrix
+
+def make_BERT_context_data(X_y, pre = 2, post = 2):
+
+    train_index, test_index = train_test_split(X_y.index.drop_duplicates(), test_size=0.1, random_state=2018)
+    train_index, val_index = train_test_split(train_index, test_size=0.1, random_state=2018)
+
+    X_train = [bert_prep(X_y.loc[train_index].pre.values, pre),
+               bert_prep(X_y.loc[train_index].post.values, post)]
+
+    y_train = X_y.loc[train_index].label.values
+
+    X_val = [bert_prep(X_y.loc[val_index].pre.values, pre),
+             bert_prep(X_y.loc[val_index].post.values, post)]
+
+    y_val = X_y.loc[val_index].label.values
+
+    X_test = [bert_prep(X_y.loc[test_index].pre.values, pre),
+              bert_prep(X_y.loc[test_index].post.values, post)]
+
+    y_test = X_y.loc[test_index].label.values
+
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
+def make_context_data(X_y, pre = 2, post = 2, word = True):
+
+    tokenizer = Tokenizer(num_words = 20000)
+    tokenizer.fit_on_texts(X_y.pre.to_list())
+    
+    embedding_matrix = get_embedding_weights(tokenizer.word_index)
+
+    train_index, test_index = train_test_split(X_y.index.drop_duplicates(), test_size=0.1, random_state=2018)
+    train_index, val_index = train_test_split(train_index, test_size=0.1, random_state=2018)
+
+    pad = lambda sequences, maxlen: pad_sequences(tokenizer.texts_to_sequences(sequences), maxlen=maxlen)
+
+    X_train = pad(X_y.loc[train_index].pre.values, pre),\
+            pad(X_y.loc[train_index].word.values, 1),\
+            pad(X_y.loc[train_index].post.values, post)
+
+    y_train = X_y.loc[train_index].label.values
+
+    X_val = pad(X_y.loc[val_index].pre.values, pre),\
+            pad(X_y.loc[val_index].word.values, 1),\
+            pad(X_y.loc[val_index].post.values, post)
+
+    y_val = X_y.loc[val_index].label.values
+
+    X_test = pad(X_y.loc[test_index].pre.values, pre),\
+            pad(X_y.loc[test_index].word.values, 1),\
+            pad(X_y.loc[test_index].post.values, post)
+
+    y_test = X_y.loc[test_index].label.values
+
+    return X_train, y_train, X_val, y_val, X_test, y_test, embedding_matrix
+
+def get_class_weights(labels):
+    neg, pos = np.bincount(labels)
+    total = neg + pos
+    print('Examples:\n    Total: {}\n    Positive: {} ({:.2f}% of total)\n'.format(
+        total, pos, 100 * pos / total))
+
+    # Scaling by total/2 helps keep the loss to a similar magnitude.
+    # The sum of the weights of all examples stays the same.
+    weight_for_0 = (1 / neg)*(total)/2.0 
+    weight_for_1 = (1 / pos)*(total)/2.0
+
+    class_weight = {0: weight_for_0, 1: weight_for_1}
+
+    print('Weight for class 0: {:.2f}'.format(weight_for_0))
+    print('Weight for class 1: {:.2f}'.format(weight_for_1))
+
+    return class_weight
+
+def ngram_glove_lstm(data, pre_length, word_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0):  
+
+    pre = tf.keras.Input(shape=(pre_length,), dtype="int64")
+    word = tf.keras.Input(shape=(word_length,), dtype="int64")
+    post = tf.keras.Input(shape=(post_length,), dtype="int64")
+    
+    pre_embedding = layers.Embedding(embedding_matrix.shape[0], 
+                            100, 
+                            weights=[embedding_matrix],
+                            input_length = pre_length, trainable=True)
+
+    word_embedding = layers.Embedding(embedding_matrix.shape[0], 
+                        100, 
+                        weights=[embedding_matrix],
+                        input_length = word_length, trainable=True)
+
+    post_embedding = layers.Embedding(embedding_matrix.shape[0], 
+                        100, 
+                        weights=[embedding_matrix],
+                        input_length = post_length, trainable=True)
+    
+    pre_embedded = pre_embedding(pre)
+    word_embedded = word_embedding(word)
+    post_embedded = post_embedding(post)
+
+    merged = tf.keras.layers.concatenate([pre_embedded, word_embedded, post_embedded], axis=1)
+    input_length = pre_length + word_length + post_length
+
+    layer =  layers.Bidirectional(layers.LSTM(input_length*hparams['model_scale']))(merged)
+
+    model_scale = hparams['model_scale']
+
+    for _ in range(hparams['n_layers']):
+        layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
+        layer = tf.keras.layers.Dropout(hparams['dropout'])(layer)
+        model_scale = model_scale / 2
+
+    output = layers.Dense(1, activation='sigmoid')(layer)
+
+    model = tf.keras.Model(
+        inputs=[pre, word, post],
+        outputs=[output],
+    )
+
+    opt = Adam(lr = hparams['lr'])
+
+    model.compile(optimizer = opt, 
+                  loss = 'binary_crossentropy', 
+                  metrics = metrics)
+
+    class_weight = get_class_weights(data['y_train'])
+
+    model.fit(  data['X_train'] , 
+                data['y_train'],
+                batch_size=hparams['batch_size'],
+                validation_data=(data['X_val'], data['y_val']),
+                epochs=hparams['epochs'],
+                verbose = 1,
+                callbacks= callbacks,
+                class_weight = class_weight)
+
+    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+
+    return scores
+
+# do siamese lstm as class 
+
+class SiameseNgramModel:
+    def __init__(self, hparams, data):
+        pass
+
+
+
+def ngram_single_bert(data, input_length, hparams, callbacks, metrics, embedding_matrix = 0): 
+
+    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    
+    config = BertConfig() 
+    config.output_hidden_states = False # Set to True to obtain hidden states
+    
+    bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    
+    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    
+    model_scale = hparams['model_scale']
+
+    layer =  layers.LSTM(input_length*model_scale)(embedded)
+
+    for _ in range(hparams['n_layers']):
+        layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
+        layer = tf.keras.layers.Dropout(hparams['dropout'])(layer)
+        model_scale = model_scale / 2
+
+    out = tf.keras.layers.Dense(1, activation='sigmoid')(layer)
+    
+    model = tf.keras.Model(inputs=[id_input, 
+                                   mask_input, 
+                                   atn_input], 
+
+                           outputs=out)
+
+    model.compile(optimizer = Adam(lr = hparams['lr']), 
+                  loss = 'binary_crossentropy', 
+                  metrics = metrics)
+
+    class_weight = get_class_weights(data['y_train'])
+
+    model.fit(data['X_train'] , 
+              data['y_train'],
+              batch_size=hparams['batch_size'],
+              validation_data=(data['X_val'], data['y_val']),
+              epochs=hparams['epochs'],
+              verbose = 1,
+              callbacks= callbacks,
+              class_weight = class_weight)
+
+    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+
+    return scores
+
+def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0): 
+
+    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    
+    config = BertConfig() 
+    config.output_hidden_states = False # Set to True to obtain hidden states
+    
+    bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    
+    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    
+    model_scale = hparams['model_scale']
+
+    layer =  layers.LSTM(input_length*model_scale)(embedded)
+
+    for _ in range(hparams['n_layers']):
+        layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
+        layer = tf.keras.layers.Dropout(hparams['dropout'])(layer)
+        model_scale = model_scale / 2
+
+    out = tf.keras.layers.Dense(output_length, activation='softmax')(layer)
+    
+    model = tf.keras.Model(inputs=[id_input, 
+                                   mask_input, 
+                                   atn_input], 
+
+                           outputs=out)
+
+    model.compile(optimizer = Adam(lr = hparams['lr']), 
+                  loss = loss, 
+                  metrics = metrics)
+
+    model.fit(data['X_train'] , 
+              data['y_train'],
+              batch_size=hparams['batch_size'],
+              validation_data=(data['X_val'], data['y_val']),
+              epochs=hparams['epochs'],
+              verbose = 1,
+              callbacks= callbacks)
+
+    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+
+    return scores
+
+
+
+''' LEGACY FUNCTIONS '''
+
+
+
+def prep_data(data, field):
+
+    max_tags = data[field].apply(len).max()
+
+    X = data.text.values
+    y = pad_sequences(data[field], padding='post', maxlen=max_tags, value=0.0)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=2018)
+
+    X_mask,X_ids = bert_prep(X_train, max_len=200)
+
+    return X_train, X_test, y_train, y_test, X_mask, X_ids, max_tags
 
 def build_bert(input_dim = 200, output_dim=6, dropout=0.2):
     
@@ -102,14 +437,13 @@ def load_vec(emb_path_list, nmax=50000):
                     break
     return embeddings_index, words
 
-def muse_embedding(X_train):
-    src_path = '/home/burtenshaw/code/toxic_direction/toxicity/multilabel_classification/vectors/wiki.multi.en.vec'
-    tgt_path = '/home/burtenshaw/code/toxic_direction/toxicity/multilabel_classification/vectors/wiki.multi.nl.vec'
+def muse_embedding(X_train, output_sequence_length=200):
+    src_path = '/home/corpora/word_embeddings/fasttext.wiki.en.txt'
     nmax = 50000  # maximum number of word embeddings to load
 
-    embeddings_index, words = load_vec([src_path,tgt_path], nmax)
+    embeddings_index, words = load_vec([src_path], nmax)
 
-    vectorizer = TextVectorization(max_tokens=80000, output_sequence_length=200)
+    vectorizer = TextVectorization(max_tokens=80000, output_sequence_length=output_sequence_length)
     text_ds = tf.data.Dataset.from_tensor_slices(list(X_train) + words).batch(128)
     vectorizer.adapt(text_ds)
 
@@ -124,7 +458,7 @@ def muse_embedding(X_train):
     # Prepare embedding matrix
     embedding_matrix = np.zeros((num_tokens, embedding_dim))
     for word, i in word_index.items():
-        embedding_vector = embeddings_index.get(word.decode())
+        embedding_vector = embeddings_index.get(word)
     #     print(embedding_vector)
     #     break
         if embedding_vector is not None:
@@ -157,41 +491,4 @@ def build_muse_lstm(embedding_matrix, num_tokens, output_dim=6):
     model = tf.keras.Model(inputs=deep_inputs, outputs=dense_layer_1)
     auc_score = AUC(multi_label=True, curve='PR')
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[auc_score])
-    return model
-
-
-def dual_bert():
-
-    '''
-    https://github.com/cerlymarco/MEDIUM_NoteBook/blob/master/Siamese_Dual_BERT/Siamese_Dual_BERT.ipynb
-    '''
-    
-    opt = Adam(learning_rate=2e-5)
-    
-    id1 = tf.keras.layers.Input((128,), dtype=tf.int32)
-    mask1 = tf.keras.layers.Input((128,), dtype=tf.int32)
-    atn1 = tf.keras.layers.Input((128,), dtype=tf.int32)
-    
-    id2 = tf.keras.layers.Input((1,), dtype=tf.int32)
-    mask2 = tf.keras.layers.Input((1,), dtype=tf.int32)
-    atn2 = tf.keras.layers.Input((1,), dtype=tf.int32)
-    
-    
-    config = BertConfig() 
-    config.output_hidden_states = False # Set to True to obtain hidden states
-    bert_model1 = TFBertModel.from_pretrained('bert-base-uncased', config=config)
-    bert_model2 = TFBertModel.from_pretrained('bert-base-uncased', config=config)
-    
-    embedding1 = bert_model1(id1, attention_mask=mask1, token_type_ids=atn1)[0]
-    embedding2 = bert_model2(id2, attention_mask=mask2, token_type_ids=atn2)[0]
-    
-    x1 = tf.keras.layers.GlobalAveragePooling1D()(embedding1)
-    x2 = tf.keras.layers.GlobalAveragePooling1D()(embedding2)
-    
-    x = tf.keras.layers.Concatenate()([x1, x2])
-    x = tf.keras.layers.Dense(64, activation='relu')(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
-    out = tf.keras.layers.Dense(1, activation='sigmoid')(x)
-    
-    model = tf.keras.Model(inputs=[id1, mask1, atn1, id2, mask2, atn2], outputs=out)
     return model

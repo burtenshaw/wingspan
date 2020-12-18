@@ -77,4 +77,7 @@ _data = pd.read_pickle("data/train.bin").loc[test_index]
 
 component_models = [('muse', 0.5), ('lex', 0), ('ensemble', 0.01)]
 
-r = EvalResults(component_models, results_df)
+r = EvalResults(component_models, results_df , params = {'muse' : {'lr' : 0, 'activation' : 'relu'}})
+r.rdf# %%
+
+# %%

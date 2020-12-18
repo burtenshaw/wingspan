@@ -41,3 +41,4 @@ train['tuples'] = train[['word_mask', 'tokens']].apply(lambda row : list(enumera
 train.to_csv(data_dir + 'train.csv')
 train.to_pickle(data_dir + 'train.bin')
 # %%
+# %%

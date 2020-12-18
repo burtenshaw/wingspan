@@ -108,7 +108,27 @@ def make_word_level_df(train, max_len = 200):
                     'label' : x.tuples[1][1]},\
         result_type = 'expand', axis = 1)
 
-# eval
+def make_context_labelling(row, pre = 2, post = 2, word = 0):
+    context_label = []
+    for n, _label in enumerate(row.word_mask):
+        start = n-pre
+        if start < 0:
+            start = 0
+        _pre = ' '.join(row.tokens[start:n])
+        _word = row.tokens[n]
+        _post = ' '.join(row.tokens[n+1:n+post+1])
+        
+        if word:
+            context_label.append((_pre, _word, _post, _label))
+        else:
+            context_label.append((_pre + ' ' + _word, ' ', _post, _label))
+
+    return context_label
+
+
+
+
+# EVALUATION SPECIFIC TO SEMEVAL 2020
 
 # f1 = 2*(Recall * Precision) / (Recall + Precision)
 # def f1(predictions, gold):

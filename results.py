@@ -5,10 +5,9 @@ from sklearn.metrics import f1_score, precision_recall_fscore_support, classific
 from utils import *
 
 
-
 class EvalResults:
 
-    def __init__(self, component_models, results_df, format_conversions = [], metrics = [], roc = False):
+    def __init__(self, component_models, results_df, params = {}, format_conversions = [], metrics = [], roc = False):
         test_index = results_df.index.drop_duplicates()
 
         _data = pd.read_pickle("data/train.bin").loc[test_index]
@@ -16,7 +15,7 @@ class EvalResults:
         format_conversions.extend([('entity', word_mask_to_character_entity), 
                     ('word_mask', lambda x, field, pad, result_shape : np.where(np.array(x[field]) == 1)[0])])
 
-        metrics.extend([('f1', precision), 
+        metrics.extend([('f1', f1), 
                     ('precision', precision), 
                     ('recall' ,recall), 
                     ('span_mean', lambda x, y : np.mean(y)) 
@@ -37,17 +36,31 @@ class EvalResults:
             self.do_t = lambda x , t: np.where(x > t , 1 , 0)
             
         for model,t in component_models:
-            edf['%s_pred' % model] = results_df[model].groupby(level=0).pred.apply(np.array)\
-                        .apply(self.do_t, t = t)
+            prediction_label = '%s_pred' % model
+            predictions = results_df[model].groupby(level=0).pred.apply(np.array).apply(self.do_t, t = t)
+            edf[prediction_label] = predictions
+            print(model)
             
             for format_label, format_func in format_conversions:
-                edf['%s_pred_%s' % (model, format_label)] = edf.apply(format_func, \
-                    field = '%s_pred' % model, pad = False, result_shape=200, axis=1)
-                
+                model_format_label = '%s_%s' % (prediction_label, format_label)
+                formatted_predictions = edf.apply(format_func, field = prediction_label, pad = False, result_shape=200, axis=1)
+                edf[model_format_label] = formatted_predictions
+                print('\t %s' % (format_label))
+
                 for metric_label, metric in metrics:
-                    rdf.at[model, (format_label, metric_label)] = edf.apply(lambda row : \
-                        metric(row['%s_pred_%s' % (model, format_label)], row[format_label]), axis = 1).mean()
-            rdf.at[model, 'support'] = edf[format_label].apply(len).sum()
+                    model_metric_label = '%s_%s' % (model_format_label, metric_label)
+                    metric_result = edf.apply(lambda row : metric(row[format_label], row[model_format_label]), axis = 1)
+                    edf[model_metric_label] = metric_result
+                    print('\t \t: %s : %s' % \
+                        (metric_label, metric_result.mean()))
+                    
+                    # rdf.at[model, (format_label, metric_label)] = metric_result.mean()
+
+            # rdf.at[model, 'support'] = edf[format_label].apply(len).sum()
+
+            if model in params:
+                for k, v in params[model].items():
+                    rdf.at[model, ('params', k)] = v
 
         self.rdf = rdf
         self.edf = edf
@@ -63,6 +76,88 @@ class EvalResults:
 
         # self.roc_dict = self.rocdf.apply(lambda row : row.threshold[np.argmax(row.tpr) - \
         #                                             np.argmax(row.fpr)], axis=1 ).to_dict()
+
+
+#!/usr/bin/env python
+import sys
+import os
+import os.path
+from scipy.stats import sem
+import numpy as np
+from ast import literal_eval
+
+def f1(predictions, gold):
+    """
+    F1 (a.k.a. DICE) operating on two lists of offsets (e.g., character).
+    >>> assert f1([0, 1, 4, 5], [0, 1, 6]) == 0.5714285714285714
+    :param predictions: a list of predicted offsets
+    :param gold: a list of offsets serving as the ground truth
+    :return: a score between 0 and 1
+    """
+    if len(gold) == 0:
+        return 1. if len(predictions) == 0 else 0.
+    if len(predictions) == 0:
+        return 0.
+    predictions_set = set(predictions)
+    gold_set = set(gold)
+    nom = 2 * len(predictions_set.intersection(gold_set))
+    denom = len(predictions_set) + len(gold_set)
+    return float(nom)/float(denom)
+
+
+def evaluate(pred_lines, gold_lines):
+    """
+    Based on https://github.com/felipebravom/EmoInt/blob/master/codalab/scoring_program/evaluation.py
+    :param pred: file with predictions
+    :param gold: file with ground truth
+    :return:
+    """
+    # # read the predictions
+    # pred_lines = pred.readlines()
+    # # read the ground truth
+    # gold_lines = gold.readlines()
+
+    # only when the same number of lines exists
+    if (len(pred_lines) == len(gold_lines)):
+        data_dic = {}
+        for n, line in enumerate(gold_lines):
+            parts = line.split('\t')
+            if len(parts) == 2:
+                data_dic[int(parts[0])] = [literal_eval(parts[1])]
+            else:
+                raise ValueError('Format problem for gold line %d.', n)
+
+        for n, line in enumerate(pred_lines):
+            parts = line.split('\t')
+            if len(parts) == 2:
+                if int(parts[0]) in data_dic:
+                    try:
+                        data_dic[int(parts[0])].append(literal_eval(parts[1]))
+                    except ValueError:
+                        # Invalid predictions are replaced by a default value
+                        data_dic[int(parts[0])].append([])
+                else:
+                    raise ValueError('Invalid text id for pred line %d.', n)
+            else:
+                raise ValueError('Format problem for pred line %d.', n)
+
+        # lists storing gold and prediction scores
+        scores = []
+        for id in data_dic:
+            if len(data_dic[id]) == 2:
+                gold_spans = data_dic[id][0]
+                pred_spans = data_dic[id][1]
+                scores.append(f1(pred_spans, gold_spans))
+            else:
+                sys.exit('Repeated id in test data.')
+
+        return (np.mean(scores), sem(scores))
+
+    else:
+        print('Predictions and gold data have different number of lines.')
+
+
+
 
 # class EvalResults:
 
