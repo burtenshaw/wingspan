@@ -1,7 +1,8 @@
 # TODO
 
-## preporcessing
+## preprocessing
 - [x] improve accuracy of word mask back to ranges
+- [ ] accuracy from mask format to contiguous ranges is f1 0.92
 
 ## models
 - [x] use all task specific evaluations
@@ -33,7 +34,7 @@
 
 - take ngrams of before and after word n and predict if n = toxic
 - performing well for simplicity
-- added seperate word embedding
+- added separate word embedding
 - trying on longer ngrams
 - TODO : add word embedding to hp optimisation loop    
 - 0.8 on word toxic prediction
@@ -52,7 +53,7 @@
 
 ## span_bert
 
-- predict the binary word mask of asentence
+- predict the binary word mask of a sentence
 - applied up sampling
 - TODO : find a way of weighting word labels over binary word mask target
 - TODO : add up sampling into hp optimisation loop
