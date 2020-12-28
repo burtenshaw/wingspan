@@ -375,6 +375,49 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
 
     return scores
 
+def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0): 
+
+    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    
+    config = BertConfig() 
+    config.output_hidden_states = False # Set to True to obtain hidden states
+    
+    bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
+    
+    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    
+    model_scale = hparams['model_scale']
+
+    logits = layers.Dense(output_length, use_bias = False)(embedded)
+    logits = layers.Flatten()(logits)
+
+    out = layers.Activation(K.activations.softmax)(logits)
+
+    model = tf.keras.Model(inputs=[id_input, 
+                                   mask_input, 
+                                   atn_input], 
+
+                           outputs=out)
+
+    loss = K.losses.SparseCategoricalCrossentropy(from_logits=False)
+    model.compile(optimizer = Adam(lr = hparams['lr']), 
+                  loss = loss, 
+                  metrics = metrics)
+
+    model.fit(data['X_train'] , 
+              data['y_train'],
+              batch_size=hparams['batch_size'],
+              validation_data=(data['X_val'], data['y_val']),
+              epochs=hparams['epochs'],
+              verbose = 1,
+              callbacks= callbacks)
+
+    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+
+    return scores
+
 
 
 ''' LEGACY FUNCTIONS '''

@@ -6,9 +6,11 @@ import os
 import seaborn as sns
 import random
 import datetime
+import string
+import re
+import tempfile
 
 import tensorflow as tf
-
 from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -25,24 +27,19 @@ from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassific
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, precision_recall_fscore_support, classification_report, roc_curve
 from sklearn.model_selection import RandomizedSearchCV, KFold
+from sklearn.preprocessing import StandardScaler
 
 from tensorflow.keras.utils import to_categorical
-os.chdir('/home/burtenshaw/now/spans_toxic')
 
-# %load_ext tensorboard
-# %load_ext autoreload
-# %autoreload 2
+if get_ipython().__class__.__name__ == 'ZMQInteractiveShell':
+    os.chdir('/home/burtenshaw/now/spans_toxic')
+    %load_ext tensorboard
+    %load_ext autoreload
+    %autoreload 2
 
 from results import EvalResults
 from utils import *
 from models import *
-
-import string
-import re
-
-import tempfile
-
-from sklearn.preprocessing import StandardScaler
 
 tf.config.list_physical_devices(device_type='GPU')
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
@@ -60,12 +57,12 @@ X_train_id, X_train_mask, X_train_attn = bert_prep(data.loc[train_index].text.to
 X_val_id, X_val_mask, X_val_attn = bert_prep(data.loc[val_index].text.to_list(), max_len = MAX_LEN)
 X_test_id, X_test_mask, X_test_attn = bert_prep(data.loc[test_index].text.to_list(), max_len = MAX_LEN)
 
-y = to_categorical(data.n_spans.values)
+y = to_categorical(data.start.values)
 y_train = y[train_index]
 y_val = y[val_index]
 y_test =y[test_index]
 #%%
-METHOD_NAME = 'categorical_bert'
+METHOD_NAME = 'categorical_start'
 LOG_DIR = "logs/" + METHOD_NAME
 
 HPARAMS = [
@@ -123,7 +120,7 @@ while now < tomorrow:
     with tf.summary.create_file_writer(run_dir).as_default():
         hp.hparams(hparams)  # record the values used in this trial
         
-        results = bert_to_mask(data = train_samples,
+        results = categorical_bert(data = train_samples,
                                input_length = MAX_LEN,
                                output_length = y_val[0].shape[0],
                                hparams = hparams, 

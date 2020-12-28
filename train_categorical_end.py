@@ -51,27 +51,26 @@ MAX_LEN = 128
 
 data_dir = '/home/burtenshaw/now/spans_toxic/data/'
 data = pd.read_pickle(data_dir + "train.bin")
-data = data.loc[data.word_mask.apply(np.array).apply(sum) > 1]
 
-train_index, test_index = train_test_split(data.index.drop_duplicates(), test_size=0.1, random_state=2018)
-train_index, val_index = train_test_split(train_index, test_size=0.1, random_state=2018)
+train_index, test_index = train_test_split(data.index.drop_duplicates(), test_size=0.2, random_state=2018)
+train_index, val_index = train_test_split(train_index, test_size=0.2, random_state=2018)
 
 #%%
 X_train_id, X_train_mask, X_train_attn = bert_prep(data.loc[train_index].text.to_list(), max_len = MAX_LEN)
 X_val_id, X_val_mask, X_val_attn = bert_prep(data.loc[val_index].text.to_list(), max_len = MAX_LEN)
 X_test_id, X_test_mask, X_test_attn = bert_prep(data.loc[test_index].text.to_list(), max_len = MAX_LEN)
 
-y_train = np.vstack(pad_sequences(data.loc[train_index].word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
-y_val = np.vstack(pad_sequences(data.loc[val_index].word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
-y_test = np.vstack(pad_sequences(data.loc[test_index].word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
+y = to_categorical(data.end.values)
+y_train = y[train_index]
+y_val = y[val_index]
+y_test =y[test_index]
 #%%
-METHOD_NAME = 'span_bert'
-ROUND_NAME = 'ROUND_2_WEIGHTED'
+METHOD_NAME = 'categorical_end'
 LOG_DIR = "logs/" + METHOD_NAME
 
 HPARAMS = [
-          hp.HParam('activation', hp.Discrete(['relu'])),
-          hp.HParam('batch_size', hp.Discrete([8,16])),
+          hp.HParam('activation', hp.Discrete(['relu', 'tanh'])),
+          hp.HParam('batch_size', hp.Discrete([8,16,32])),
           hp.HParam('lr', hp.Discrete([0.001, 0.01, 0.1])),
           hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
           hp.HParam('n_layers', hp.Discrete([1,2,3,4])),
@@ -116,7 +115,7 @@ while now < tomorrow:
     # ngram_str = '/pr_%s_w_%s_po_%s_' % (pre, word, post)
     param_str = '_'.join(['%s_%s' % (k,v) for k,v in hparams.items()]).replace('.', '')
 
-    run_dir = '%s/%s_%s ' % (LOG_DIR, ROUND_NAME, param_str)
+    run_dir = LOG_DIR + '/' + param_str
 
     callbacks = [hp.KerasCallback(run_dir, hparams),
                 TensorBoard(log_dir=LOG_DIR, histogram_freq=1)]
@@ -126,10 +125,11 @@ while now < tomorrow:
         
         results = bert_to_mask(data = train_samples,
                                input_length = MAX_LEN,
-                               output_length = MAX_LEN,
+                               output_length = y_val[0].shape[0],
                                hparams = hparams, 
                                callbacks = callbacks, 
-                               metrics = METRICS)
+                               metrics = METRICS,
+                               loss = 'categorical_crossentropy',)
 
         print('_' * 80)
         # print(ngram_str)
@@ -147,4 +147,4 @@ while now < tomorrow:
     print('\n accuracy : %s' % results)
 
     now = datetime.datetime.now()
-# %%
+    # %%

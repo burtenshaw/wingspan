@@ -1,8 +1,8 @@
 # TODO
 
 ## preprocessing
-- [x] improve accuracy of word mask back to ranges
-- [ ] accuracy from mask format to contiguous ranges is f1 0.92
+- [x] word mask back to contiguous ranges
+- [ ] improve accuracy from mask to contiguous ranges is f1 0.92 
 
 ## models
 - [x] use all task specific evaluations
@@ -17,7 +17,7 @@
 - [ ] add multilabel as embedding
 - [ ] ensemble numerical values
 - [x] predicted n_spans, 
-- [ ] predicted toxicity, 
+- [x] predicted toxicity, 
 - [ ] predict span start,
 - [ ] predicted span end,
 - [ ] predicted span length
@@ -58,9 +58,23 @@
 - TODO : find a way of weighting word labels over binary word mask target
 - TODO : add up sampling into hp optimisation loop
 
-## categorical_bert
+# Categorical Sub methods
+
+## predicted mutilabel toxicity
+
+## predicted n_spans
+
+`categorical_spans`
 
 - predict number of spans [ to be ensembled with other numerical tasks]
 - ~ 0.97 on nspan prediction
 
-ensemble
+## predict span start
+
+## predicted span end
+
+## predicted span length
+
+## train a model using numerical data
+
+## ensemble
