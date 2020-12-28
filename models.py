@@ -39,11 +39,11 @@ def bert_prep(text, max_len=128):
         mask_ids.append(encoding['token_type_ids'])
         attn_ids.append(encoding["attention_mask"])
 
-    x_id = np.array(padded_ids)
-    x_mask = np.array(mask_ids)
-    x_attn = np.array(attn_ids)
+    input_ids = np.array(padded_ids)
+    token_type_ids = np.array(mask_ids)
+    attention_mask = np.array(attn_ids)
         
-    return x_id, x_mask, x_attn
+    return input_ids, token_type_ids, attention_mask
 
 
 def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0): 
@@ -375,43 +375,43 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
 
     return scores
 
-def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0): 
+def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, verbose = 1, loss = 'categorical_crossentropy', embedding_matrix = 0): 
 
-    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    ids_input = layers.Input((input_length,), dtype=tf.int32)
+    token_type_input = layers.Input((input_length,), dtype=tf.int32)
+    attn_mask_input = layers.Input((input_length,), dtype=tf.int32)
     
     config = BertConfig() 
     config.output_hidden_states = False # Set to True to obtain hidden states
     
     bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
     
-    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    embedded = bert_model(ids_input, attention_mask=attn_mask_input, token_type_ids=token_type_input)[0]
     
     model_scale = hparams['model_scale']
 
-    logits = layers.Dense(output_length, use_bias = False)(embedded)
-    logits = layers.Flatten()(logits)
+    layer =  layers.Dense(input_length*model_scale)(embedded)
+    layer = layers.Dense(output_length)(layer)
+    layer =  layers.LSTM(output_length)(layer)
 
-    out = layers.Activation(K.activations.softmax)(logits)
+    out = layers.Activation(K.activations.softmax)(layer)
 
-    model = tf.keras.Model(inputs=[id_input, 
-                                   mask_input, 
-                                   atn_input], 
-
+    model = tf.keras.Model(inputs=[ids_input, 
+                                   token_type_input, 
+                                   attn_mask_input], 
                            outputs=out)
 
-    loss = K.losses.SparseCategoricalCrossentropy(from_logits=False)
+    # loss = K.losses.SparseCategoricalCrossentropy(from_logits=False)
     model.compile(optimizer = Adam(lr = hparams['lr']), 
                   loss = loss, 
                   metrics = metrics)
 
-    model.fit(data['X_train'] , 
+    model.fit(data['X_train'], 
               data['y_train'],
               batch_size=hparams['batch_size'],
               validation_data=(data['X_val'], data['y_val']),
               epochs=hparams['epochs'],
-              verbose = 1,
+              verbose = verbose,
               callbacks= callbacks)
 
     scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)

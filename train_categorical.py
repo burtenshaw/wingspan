@@ -1,69 +1,67 @@
 # %%
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import os
-import seaborn as sns
 import random
 import datetime
 import string
 import re
 import tempfile
+import sys
 
 import tensorflow as tf
 from tensorflow.keras import layers
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.callbacks import EarlyStopping, TensorBoard
-from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
-from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
-from tensorflow.keras.layers import Embedding, LSTM, Dense
-from tensorflow.keras.metrics import TruePositives, FalsePositives, TrueNegatives, FalseNegatives, BinaryAccuracy, Precision, Recall, AUC
 
 import tensorflow_hub as hub
 from tensorboard.plugins.hparams import api as hp
 
 from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassification
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, precision_recall_fscore_support, classification_report, roc_curve
-from sklearn.model_selection import RandomizedSearchCV, KFold
-from sklearn.preprocessing import StandardScaler
 
 from tensorflow.keras.utils import to_categorical
 
+from IPython import get_ipython
+
 if get_ipython().__class__.__name__ == 'ZMQInteractiveShell':
+    # ipython convenience
+    mgc = get_ipython().magic
+    mgc(u'%load_ext tensorboard')
+    mgc(u'%load_ext autoreload')
+    mgc(u'%autoreload 2')
+    METHOD_NAME = 'categorical_start'
+    LOG_DIR = "logs/" + METHOD_NAME
     os.chdir('/home/burtenshaw/now/spans_toxic')
-    %load_ext tensorboard
-    %load_ext autoreload
-    %autoreload 2
+    os.environ["CUDA_VISIBLE_DEVICES"]="0"
+else:
+    METHOD_NAME = sys.argv[1]
+    LOG_DIR = "logs/categorical/" + METHOD_NAME
 
 from results import EvalResults
 from utils import *
 from models import *
 
 tf.config.list_physical_devices(device_type='GPU')
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
+#%%%
 MAX_LEN = 128
 
 data_dir = '/home/burtenshaw/now/spans_toxic/data/'
-data = pd.read_pickle(data_dir + "train.bin")
 
-train_index, test_index = train_test_split(data.index.drop_duplicates(), test_size=0.2, random_state=2018)
-train_index, val_index = train_test_split(train_index, test_size=0.2, random_state=2018)
+train = pd.read_pickle(data_dir + "train.bin")
+val = pd.read_pickle(data_dir + "val.bin")
+test = pd.read_pickle(data_dir + "test.bin")
+
+X_train = bert_prep(train.text.to_list(), max_len = MAX_LEN)
+X_val = bert_prep(val.text.to_list(), max_len = MAX_LEN)
+X_test = bert_prep(test.text.to_list(), max_len = MAX_LEN)
+
+OUTPUT_LENGTH = max(train.start.max(), val.start.max(), test.start.max()) + 1
+
+y_train = to_categorical(train.start.values, num_classes = OUTPUT_LENGTH)
+y_val = to_categorical(val.start.values, num_classes = OUTPUT_LENGTH)
+y_test = to_categorical(test.start.values, num_classes = OUTPUT_LENGTH)
 
 #%%
-X_train_id, X_train_mask, X_train_attn = bert_prep(data.loc[train_index].text.to_list(), max_len = MAX_LEN)
-X_val_id, X_val_mask, X_val_attn = bert_prep(data.loc[val_index].text.to_list(), max_len = MAX_LEN)
-X_test_id, X_test_mask, X_test_attn = bert_prep(data.loc[test_index].text.to_list(), max_len = MAX_LEN)
-
-y = to_categorical(data.start.values)
-y_train = y[train_index]
-y_val = y[val_index]
-y_test =y[test_index]
-#%%
-METHOD_NAME = 'categorical_start'
-LOG_DIR = "logs/" + METHOD_NAME
 
 HPARAMS = [
           hp.HParam('activation', hp.Discrete(['relu', 'tanh'])),
@@ -72,19 +70,12 @@ HPARAMS = [
           hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
           hp.HParam('n_layers', hp.Discrete([1,2,3,4])),
           hp.HParam('model_scale',hp.Discrete([1,2])),
-          hp.HParam('epochs', hp.Discrete([2]))
+          hp.HParam('epochs', hp.Discrete([10])),
           ]
 
 METRICS = [
-          TruePositives(name='tp'),
-          FalsePositives(name='fp'),
-          TrueNegatives(name='tn'),
-          FalseNegatives(name='fn'), 
-          BinaryAccuracy(name='binary_accuracy'),
-          Precision(name='precision'),
-          Recall(name='recall'),
-          AUC(name='auc')
-]
+          tf.keras.metrics.CategoricalAccuracy(name='categorical_accuracy')
+          ]
 
 with tf.summary.create_file_writer(LOG_DIR).as_default():
     hp.hparams_config(
@@ -93,20 +84,20 @@ with tf.summary.create_file_writer(LOG_DIR).as_default():
     )
 
 print('logging at :', LOG_DIR)
+
 now = datetime.datetime.now()
 tomorrow = now + datetime.timedelta(days=1)
-
 
 #%%
 while now < tomorrow:
 
     hparams = {hp.name : hp.domain.sample_uniform() for hp in HPARAMS}
     
-    train_samples = {'X_train' : [X_train_id, X_train_mask, X_train_attn], 
+    train_samples = {'X_train' : X_train, 
                      'y_train' : y_train, 
-                     'X_val' : [X_val_id, X_val_mask, X_val_attn], 
+                     'X_val' : X_val, 
                      'y_val' : y_val, 
-                     'X_test' : [X_test_id, X_test_mask, X_test_attn], 
+                     'X_test' : X_test, 
                      'y_test' : y_test}
 
     # ngram_str = '/pr_%s_w_%s_po_%s_' % (pre, word, post)
@@ -115,7 +106,8 @@ while now < tomorrow:
     run_dir = LOG_DIR + '/' + param_str
 
     callbacks = [hp.KerasCallback(run_dir, hparams),
-                TensorBoard(log_dir=LOG_DIR, histogram_freq=1)]
+                TensorBoard(log_dir=LOG_DIR, histogram_freq=1),
+                EarlyStopping(patience=2)]
 
     with tf.summary.create_file_writer(run_dir).as_default():
         hp.hparams(hparams)  # record the values used in this trial
@@ -126,7 +118,7 @@ while now < tomorrow:
                                hparams = hparams, 
                                callbacks = callbacks, 
                                metrics = METRICS,
-                               loss = 'categorical_crossentropy',)
+                               loss = 'categorical_crossentropy')
 
         print('_' * 80)
         # print(ngram_str)
