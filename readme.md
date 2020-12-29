@@ -2,7 +2,6 @@
 
 ## preprocessing
 - [x] word mask back to contiguous ranges
-- [ ] improve accuracy from mask to contiguous ranges is f1 0.92 
 
 ## models
 - [x] use all task specific evaluations
@@ -15,13 +14,24 @@
 
 ## categorical sub-tasks
 - [ ] add multilabel as embedding
-- [ ] ensemble numerical values
 - [x] predicted n_spans, 
-- [x] predicted toxicity, 
-- [ ] predict span start,
-- [ ] predicted span end,
-- [ ] predicted span length
-- [ ] train a model using numerical data
+- [x] predicted multilabel toxicity, 
+- [x] predict span start,
+- [x] predicted span end,
+- [x] predicted span length
+- [ ] spacy vectors 
+- [ ] spacy word sentiment 
+- [ ] glove word embeddings
+- [ ] sentence bert
+- [ ] train an ensemble model using numerical data
+
+## Postprocessing
+
+- [x] improve accuracy from mask to contiguous ranges is f1 0.92 
+
+## Cross validation_data
+
+- [ ] 5 fold cross validation
 
 # Current Methods :
 
@@ -39,7 +49,6 @@
 - TODO : add word embedding to hp optimisation loop    
 - 0.8 on word toxic prediction
 
-
 ## ngram_bert
 
 - as above using bert
@@ -48,7 +57,7 @@
 
 ## mask_bert
 
-- predict the word toxicity give a sentence of a sentence given, use token type_ids to mark the target word
+- predict the word toxicity given a sentence of a sentence given, use token type_ids to mark the target word
 - flawed 
 
 ## span_bert
