@@ -6,7 +6,65 @@ import itertools
 
 from tensorflow.keras.utils import to_categorical
 
-# PREPROCESSING / MANIPULATION
+import spacy
+from spacy.tokens import Span
+
+nlp = spacy.load("en_core_web_sm")
+
+
+'''PREPROCESSING'''
+ 
+def spans_to_ents(doc, spans, label):
+  """Converts span indicies into spacy entity labels."""
+  started = False
+  left, right, ents = 0, 0, []
+  for x in doc:
+    if x.pos_ == 'SPACE':
+      continue
+    if spans.intersection(set(range(x.idx, x.idx + len(x.text)))):
+      if not started:
+        left, started = x.idx, True
+      right = x.idx + len(x.text)
+    elif started:
+      ents.append((left, right, label))
+      started = False
+  if started:
+    ents.append((left, right, label))
+
+  # ents = [Span(doc,start,end, label=label) for start, end, label in ents]
+  # doc.ents = ents
+  return ents
+
+def add_ents(row):
+    row.doc.ents = row.doc_ents
+    return row.doc
+
+def spacy_ents_to_word_mask(doc):
+  word_mask = np.zeros(len(doc))
+  for span in doc.ents:
+      for word_idx in np.arange(span.start,span.end):
+          word_mask[word_idx] = 1
+  return word_mask
+def spacy_word_mask_to_spans(row, field = 'word_mask'):
+    doc = nlp(row.text)
+    word_mask = row[field]
+    pred_spans = []
+    last = 0
+
+    for token in doc:
+        if word_mask[token.i] == 1:
+            start = token.idx
+            end = token.idx + len(token)
+            if last == 1:
+                start -= 1
+            pred_spans.extend(range(start, end))
+        last = word_mask[token.i]
+    
+    return pred_spans
+
+
+
+
 
 def word_mask_to_character_entity(row, field = 'word_mask', result_shape=200, pad = True):
     """
@@ -27,29 +85,6 @@ def word_mask_to_character_entity(row, field = 'word_mask', result_shape=200, pa
         toxic_offsets = np.pad(mask, (0, result_shape-mask.shape[0]))
     return toxic_offsets
 
-def word_mask_to_spans(row):
-    """
-    Replication of the above. could be used to improve parsin accuracy
-    """
-
-    cont_ranges = []
-    prev_char_pos = 0
-    prev_binary = mask[0]
-    for n, span in itertools.groupby(zip(row.mask, row.tokens), lambda p: len(p[1]) - p[0]):
-        now_binary, word = list(span)[0]
-        now_char_pos = len(word) + 1 + prev_char_pos
-
-        if prev_binary == 0 and now_binary == 1:
-            cont_ranges.extend(range(prev_char_pos, now_char_pos))
-            on_span = n
-        
-        elif prev_binary == 1 and now_binary == 1:
-            cont_ranges.extend(range(prev_char_pos - (n-on_span), now_char_pos - 1))
-
-        prev_binary = now_binary
-        prev_char_pos = now_char_pos
-
-    return cont_ranges
 
 def contiguous_ranges(span_list, flatten=False):
     """Extracts continguous runs [1, 2, 3, 5, 6, 7] -> [(1,3), (5,7)].
@@ -89,6 +124,10 @@ def make_word_mask(row):
 def character_mask_to_entities(target_mask):
     return np.where(np.array(target_mask) == 1)[0]
 
+
+
+'''MANIPULATION'''
+
 def pad_mask(mask, max_len = 200):
     mask = mask[:max_len]
     return np.pad(mask, (0,max_len - mask.shape[0]))
@@ -108,27 +147,11 @@ def make_word_level_df(train, max_len = 200):
                     'label' : x.tuples[1][1]},\
         result_type = 'expand', axis = 1)
 
-def make_context_labelling(row, pre = 2, post = 2, word = 0):
-    context_label = []
-    for n, _label in enumerate(row.word_mask):
-        start = n-pre
-        if start < 0:
-            start = 0
-        _pre = ' '.join(row.tokens[start:n])
-        _word = row.tokens[n]
-        _post = ' '.join(row.tokens[n+1:n+post+1])
-        
-        if word:
-            context_label.append((_pre, _word, _post, _label))
-        else:
-            context_label.append((_pre + ' ' + _word, ' ', _post, _label))
-
-    return context_label
 
 
 
 
-# EVALUATION SPECIFIC TO SEMEVAL 2020
+'''EVALUATION SPECIFIC TO SEMEVAL 2020'''
 
 # f1 = 2*(Recall * Precision) / (Recall + Precision)
 # def f1(predictions, gold):

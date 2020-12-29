@@ -21,6 +21,63 @@ from transformers import BertTokenizer, TFBertModel , TFBertForSequenceClassific
 from sklearn.model_selection import train_test_split
 
 
+def make_context_labelling(row, pre = 2, post = 2, word = 0):
+    context_label = []
+    for n, _label in enumerate(row.word_mask):
+        start = n-pre
+        if start < 0:
+            start = 0
+        _pre = ' '.join(row.tokens[start:n])
+        _word = row.tokens[n]
+        _post = ' '.join(row.tokens[n+1:n+post+1])
+        
+        if word:
+            context_label.append((_pre, _word, _post, _label))
+        else:
+            context_label.append((_pre + ' ' + _word, ' ', _post, _label))
+
+    return context_label
+
+def make_BERT_context_labelling(row, pre = 2, post = 2, word = 0):
+    context_label = []
+    for n, _label in enumerate(row.word_mask):
+        start = n-pre
+        if start < 0:
+            start = 0
+
+        pre_input_ids = [row.input_ids[0]] + row.input_ids[start:n+1]
+        pre_token_type_ids = [row.token_type_ids[0]] + row.token_type_ids[start:n+1]
+        pre_attn_mask = [row.attn_mask[0]] + row.attn_mask[start:n+1]
+
+        post_input_ids = [row.input_ids[0]] + row.input_ids[n:n+post+1]
+        post_token_type_ids = [row.token_type_ids[0]] + row.token_type_ids[n:n+post+1]
+        post_attn_mask = [row.attn_mask[0]] + row.attn_mask[n:n+post+1]
+
+        context_label.append({'pre_input_ids' : pre_input_ids,
+                              'pre_token_type_ids' : pre_token_type_ids,
+                              'pre_attn_mask' : pre_attn_mask,
+                              'post_input_ids' : post_input_ids,
+                              'post_token_type_ids' : post_token_type_ids,
+                              'post_attn_mask' : post_attn_mask, 
+                              'label' : _label})
+
+    return context_label
+
+def make_BERT_context_data(data, pre = 2, word = 0, post = 2):
+
+    X_y = data.apply(make_BERT_context_labelling, axis = 1, pre = pre, post = post, word = word)\
+        .explode().dropna().apply(pd.Series)
+
+    X = [pad_sequences(X_y.pre_input_ids.values, maxlen = pre+1 ),
+         pad_sequences(X_y.pre_token_type_ids.values, maxlen = pre+1 ),
+         pad_sequences(X_y.pre_attn_mask.values, maxlen = pre+1 ),
+         pad_sequences(X_y.post_input_ids.values, maxlen = post+1 ),
+         pad_sequences(X_y.post_token_type_ids.values, maxlen = post+1 ),
+         pad_sequences(X_y.post_attn_mask.values, maxlen = post+1 )]
+
+    y = X_y.label.values
+
+    return X, y
 
 def bert_prep(text, max_len=128):
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
@@ -41,39 +98,40 @@ def bert_prep(text, max_len=128):
 
     input_ids = np.array(padded_ids)
     token_type_ids = np.array(mask_ids)
-    attention_mask = np.array(attn_ids)
+    attn_mask = np.array(attn_ids)
         
-    return input_ids, token_type_ids, attention_mask
+    return input_ids, token_type_ids, attn_mask
 
 
 def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0): 
 
-    pre_id = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
-    pre_mask = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
-    pre_atn = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    pre_ids = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    pre_tok_types = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
+    pre_attn_mask = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
     
-    post_id = tf.keras.layers.Input((post_length,), dtype=tf.int32)
-    post_mask = tf.keras.layers.Input((post_length,), dtype=tf.int32)
-    post_atn = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    post_ids = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    post_tok_types = tf.keras.layers.Input((post_length,), dtype=tf.int32)
+    post_attn_mask = tf.keras.layers.Input((post_length,), dtype=tf.int32)
     
     config = BertConfig() 
     config.output_hidden_states = False # Set to True to obtain hidden states
     
     bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
     
-    pre_embedded = bert_model(pre_id, attention_mask=pre_mask, token_type_ids=pre_atn)[0]
-    post_embedded = bert_model(post_id, attention_mask=post_mask, token_type_ids=post_atn)[0]
+    pre_embedded = bert_model(pre_ids, attention_mask=pre_attn_mask, token_type_ids=pre_tok_types)[0]
+    post_embedded = bert_model(post_ids, attention_mask=post_attn_mask, token_type_ids=post_tok_types)[0]
     
-    # pre_embedded = tf.keras.layers.GlobalAveragePooling1D()(pre_embedding)
-    # post_embedded = tf.keras.layers.GlobalAveragePooling1D()(post_embedding)
+    pre_embedded = tf.keras.layers.GlobalAveragePooling1D()(pre_embedded)
+    post_embedded = tf.keras.layers.GlobalAveragePooling1D()(post_embedded)
     
     merged = tf.keras.layers.concatenate([pre_embedded, post_embedded], axis=1)
     
     input_length = pre_length + post_length
     model_scale = hparams['model_scale']
 
-    layer =  layers.LSTM(input_length*model_scale)(merged)
-
+    # layer =  layers.Bidirectional(layers.LSTM(input_length*model_scale))(merged)
+    layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(merged)
+        
     for _ in range(hparams['n_layers']):
         layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
         layer = tf.keras.layers.Dropout(hparams['dropout'])(layer)
@@ -81,12 +139,12 @@ def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, 
 
     out = tf.keras.layers.Dense(1, activation='sigmoid')(layer)
     
-    model = tf.keras.Model(inputs=[pre_id, 
-                                   pre_mask, 
-                                   pre_atn, 
-                                   post_id, 
-                                   post_mask, 
-                                   post_atn], 
+    model = tf.keras.Model(inputs=[pre_ids, 
+                                   pre_tok_types, 
+                                   pre_attn_mask, 
+                                   post_ids, 
+                                   post_tok_types, 
+                                   post_attn_mask], 
 
                            outputs=out)
 
@@ -135,27 +193,7 @@ def get_embedding_weights(word_index , src_path = '/home/corpora/word_embeddings
 
     return embedding_matrix
 
-def make_BERT_context_data(X_y, pre = 2, post = 2):
 
-    train_index, test_index = train_test_split(X_y.index.drop_duplicates(), test_size=0.1, random_state=2018)
-    train_index, val_index = train_test_split(train_index, test_size=0.1, random_state=2018)
-
-    X_train = [bert_prep(X_y.loc[train_index].pre.values, pre),
-               bert_prep(X_y.loc[train_index].post.values, post)]
-
-    y_train = X_y.loc[train_index].label.values
-
-    X_val = [bert_prep(X_y.loc[val_index].pre.values, pre),
-             bert_prep(X_y.loc[val_index].post.values, post)]
-
-    y_val = X_y.loc[val_index].label.values
-
-    X_test = [bert_prep(X_y.loc[test_index].pre.values, pre),
-              bert_prep(X_y.loc[test_index].post.values, post)]
-
-    y_test = X_y.loc[test_index].label.values
-
-    return X_train, y_train, X_val, y_val, X_test, y_test
 
 def make_context_data(X_y, pre = 2, post = 2, word = True):
 
@@ -274,24 +312,19 @@ def ngram_glove_lstm(data, pre_length, word_length, post_length, hparams, callba
 
 # do siamese lstm as class 
 
-class SiameseNgramModel:
-    def __init__(self, hparams, data):
-        pass
-
-
 
 def ngram_single_bert(data, input_length, hparams, callbacks, metrics, embedding_matrix = 0): 
 
-    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    ids = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    tok_types = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    attn_mask = tf.keras.layers.Input((input_length,), dtype=tf.int32)
     
     config = BertConfig() 
     config.output_hidden_states = False # Set to True to obtain hidden states
     
     bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
     
-    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    embedded = bert_model(ids, attention_mask=attn_mask, token_type_ids=tok_types)[0]
     
     model_scale = hparams['model_scale']
 
@@ -304,9 +337,9 @@ def ngram_single_bert(data, input_length, hparams, callbacks, metrics, embedding
 
     out = tf.keras.layers.Dense(1, activation='sigmoid')(layer)
     
-    model = tf.keras.Model(inputs=[id_input, 
-                                   mask_input, 
-                                   atn_input], 
+    model = tf.keras.Model(inputs=[ids, 
+                                   tok_types, 
+                                   attn_mask], 
 
                            outputs=out)
 
@@ -331,16 +364,16 @@ def ngram_single_bert(data, input_length, hparams, callbacks, metrics, embedding
 
 def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0): 
 
-    id_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    mask_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
-    atn_input = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    ids = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    tok_types = tf.keras.layers.Input((input_length,), dtype=tf.int32)
+    attn_mask = tf.keras.layers.Input((input_length,), dtype=tf.int32)
     
     config = BertConfig() 
     config.output_hidden_states = False # Set to True to obtain hidden states
     
     bert_model = TFBertModel.from_pretrained('bert-base-uncased', config=config)
     
-    embedded = bert_model(id_input, attention_mask=mask_input, token_type_ids=atn_input)[0]
+    embedded = bert_model(ids, attention_mask=attn_mask, token_type_ids=tok_types)[0]
     
     model_scale = hparams['model_scale']
 
@@ -353,9 +386,9 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
 
     out = tf.keras.layers.Dense(output_length, activation='softmax')(layer)
     
-    model = tf.keras.Model(inputs=[id_input, 
-                                   mask_input, 
-                                   atn_input], 
+    model = tf.keras.Model(inputs=[ids, 
+                                   tok_types, 
+                                   attn_mask], 
 
                            outputs=out)
 
@@ -375,7 +408,7 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
 
     return scores
 
-def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, verbose = 1, loss = 'categorical_crossentropy', embedding_matrix = 0): 
+def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, verbose = 1, loss = 'categorical_crossentropy', embedding_matrix = 0, return_model = False): 
 
     ids_input = layers.Input((input_length,), dtype=tf.int32)
     token_type_input = layers.Input((input_length,), dtype=tf.int32)
@@ -392,7 +425,7 @@ def categorical_bert(data, input_length, output_length, hparams, callbacks, metr
 
     layer =  layers.Dense(input_length*model_scale)(embedded)
     layer = layers.Dense(output_length)(layer)
-    layer =  layers.LSTM(output_length)(layer)
+    layer = tf.keras.layers.GlobalAveragePooling1D()(layer)
 
     out = layers.Activation(K.activations.softmax)(layer)
 
@@ -414,9 +447,11 @@ def categorical_bert(data, input_length, output_length, hparams, callbacks, metr
               verbose = verbose,
               callbacks= callbacks)
 
-    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
-
-    return scores
+    if return_model:
+        return model
+    else:
+        scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+        return scores
 
 
 

@@ -28,7 +28,7 @@ if get_ipython().__class__.__name__ == 'ZMQInteractiveShell':
     mgc(u'%load_ext tensorboard')
     mgc(u'%load_ext autoreload')
     mgc(u'%autoreload 2')
-    METHOD_NAME = 'categorical_start'
+    METHOD_NAME = 'dev/categorical_start'
     LOG_DIR = "logs/" + METHOD_NAME
     os.chdir('/home/burtenshaw/now/spans_toxic')
     os.environ["CUDA_VISIBLE_DEVICES"]="0"
@@ -52,10 +52,10 @@ val = pd.read_pickle(data_dir + "val.bin")
 test = pd.read_pickle(data_dir + "test.bin")
 
 X_train = bert_prep(train.text.to_list(), max_len = MAX_LEN)
+OUTPUT_LENGTH = max(train.start.max(), val.start.max(), test.start.max()) + 1
 X_val = bert_prep(val.text.to_list(), max_len = MAX_LEN)
 X_test = bert_prep(test.text.to_list(), max_len = MAX_LEN)
 
-OUTPUT_LENGTH = max(train.start.max(), val.start.max(), test.start.max()) + 1
 
 y_train = to_categorical(train.start.values, num_classes = OUTPUT_LENGTH)
 y_val = to_categorical(val.start.values, num_classes = OUTPUT_LENGTH)
@@ -64,11 +64,11 @@ y_test = to_categorical(test.start.values, num_classes = OUTPUT_LENGTH)
 #%%
 
 HPARAMS = [
-          hp.HParam('activation', hp.Discrete(['relu', 'tanh'])),
+          hp.HParam('activation', hp.Discrete(['relu'])),
           hp.HParam('batch_size', hp.Discrete([8,16,32])),
-          hp.HParam('lr', hp.Discrete([0.001, 0.01, 0.1])),
+          hp.HParam('lr', hp.Discrete([2e-5, 5e-5, 7e-5])),
           hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
-          hp.HParam('n_layers', hp.Discrete([1,2,3,4])),
+          hp.HParam('n_layers', hp.Discrete([1,2])),
           hp.HParam('model_scale',hp.Discrete([1,2])),
           hp.HParam('epochs', hp.Discrete([10])),
           ]
@@ -86,8 +86,8 @@ with tf.summary.create_file_writer(LOG_DIR).as_default():
 print('logging at :', LOG_DIR)
 
 now = datetime.datetime.now()
-tomorrow = now + datetime.timedelta(days=1)
-
+tomorrow = now + datetime.timedelta(days=0.5)
+runs = 0
 #%%
 while now < tomorrow:
 
@@ -101,8 +101,8 @@ while now < tomorrow:
                      'y_test' : y_test}
 
     # ngram_str = '/pr_%s_w_%s_po_%s_' % (pre, word, post)
-    param_str = '_'.join(['%s_%s' % (k,v) for k,v in hparams.items()]).replace('.', '')
-
+    # param_str = '_'.join(['%s_%s' % (k,v) for k,v in hparams.items()]).replace('.', '')
+    param_str = '%s_run_%s' % (METHOD_NAME, runs)
     run_dir = LOG_DIR + '/' + param_str
 
     callbacks = [hp.KerasCallback(run_dir, hparams),
@@ -136,4 +136,5 @@ while now < tomorrow:
     print('\n accuracy : %s' % results)
 
     now = datetime.datetime.now()
+    runs += 1
     # %%
