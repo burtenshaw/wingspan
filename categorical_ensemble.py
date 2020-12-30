@@ -36,9 +36,6 @@ else:
 
 os.chdir('/home/burtenshaw/now/spans_toxic')
 
-%load_ext autoreload
-%autoreload 2
-
 from results import EvalResults
 from utils import *
 from models import *

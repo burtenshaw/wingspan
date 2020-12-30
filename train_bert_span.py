@@ -54,15 +54,16 @@ X_test = bert_prep(test.text.to_list(), max_len = MAX_LEN)
 y_train = np.vstack(pad_sequences(train.word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
 y_val = np.vstack(pad_sequences(val.word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
 y_test = np.vstack(pad_sequences(test.word_mask.values, maxlen = MAX_LEN, truncating = 'post', padding = 'post'))
+
 #%%
 
 HPARAMS = [
           hp.HParam('activation', hp.Discrete(['relu'])),
           hp.HParam('batch_size', hp.Discrete([8,16])),
-          hp.HParam('lr', hp.Discrete([0.001, 0.01, 0.1])),
+          hp.HParam('lr', hp.Discrete([2e-5, 5e-5, 7e-5])),
           hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
-          hp.HParam('n_layers', hp.Discrete([1,2])),
-          hp.HParam('model_scale',hp.Discrete([1,2])),
+          hp.HParam('n_layers', hp.Discrete([1])),
+          hp.HParam('model_scale',hp.Discrete([1,2,3])),
           hp.HParam('epochs', hp.Discrete([2]))
           ]
 

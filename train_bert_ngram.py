@@ -54,7 +54,7 @@ NGRAM_LARGEST = 100
 
 HPARAMS = [
           hp.HParam('activation', hp.Discrete(['relu'])),
-          hp.HParam('batch_size', hp.Discrete([16, 32])),
+          hp.HParam('batch_size', hp.Discrete([8, 16])),
           hp.HParam('lr', hp.Discrete([2e-5, 5e-5])),
           hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
           hp.HParam('n_layers', hp.Discrete([1,2,3])),
