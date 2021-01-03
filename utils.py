@@ -45,6 +45,7 @@ def spacy_ents_to_word_mask(doc):
       for word_idx in np.arange(span.start,span.end):
           word_mask[word_idx] = 1
   return word_mask
+  
 def spacy_word_mask_to_spans(row, field = 'word_mask'):
     doc = nlp(row.text)
     word_mask = row[field]

@@ -22,21 +22,43 @@ from sklearn.model_selection import train_test_split
 
 
 def make_context_labelling(row, pre = 2, post = 2, word = 0):
+    
     context_label = []
     for n, _label in enumerate(row.word_mask):
         start = n-pre
         if start < 0:
             start = 0
-        _pre = ' '.join(row.tokens[start:n])
-        _word = row.tokens[n]
-        _post = ' '.join(row.tokens[n+1:n+post+1])
+        _pre = row.sequences[start:n+1]
+        _word = [row.sequences[n]]
+        _post = row.sequences[n+1:n+post+1]
         
         if word:
-            context_label.append((_pre, _word, _post, _label))
+            context_label.append({'pre' : _pre, 
+                                  'word' : _word, 
+                                  'post' : _post, 
+                                  'label' : _label})
         else:
-            context_label.append((_pre + ' ' + _word, ' ', _post, _label))
+            _pre.extend(_word)
+            context_label.append({'pre' : _pre, 
+                                  'word' : [], 
+                                  'post' : _post, 
+                                  'label' : _label})
 
     return context_label
+
+def make_context_data(data, pre = 2, post = 2, word = 1):
+    pad = lambda sequences, maxlen: pad_sequences(sequences, maxlen=maxlen)
+    
+    X_y = data.apply(make_context_labelling, axis = 1, pre = pre, post = post, word = word)\
+        .explode().dropna().apply(pd.Series)
+
+    X = [pad(X_y.pre.values, pre),
+         pad(X_y.word.values, word),
+         pad(X_y.post.values, post)]
+    
+    y = X_y.label.values
+
+    return X, y, X_y.index
 
 def make_BERT_context_labelling(row, pre = 2, post = 2, word = 0):
     context_label = []
@@ -77,7 +99,7 @@ def make_BERT_context_data(data, pre = 2, word = 0, post = 2):
 
     y = X_y.label.astype(np.int).values
 
-    return X, y
+    return X, y, X_y.index
 
 def bert_prep(text, max_len=128):
     tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
@@ -127,41 +149,8 @@ def get_embedding_weights(word_index , src_path = '/home/corpora/word_embeddings
     return embedding_matrix
 
 
-
-def make_context_data(X_y, pre = 2, post = 2, word = True):
-
-    tokenizer = Tokenizer(num_words = 20000)
-    tokenizer.fit_on_texts(X_y.pre.to_list())
-    
-    embedding_matrix = get_embedding_weights(tokenizer.word_index)
-
-    train_index, test_index = train_test_split(X_y.index.drop_duplicates(), test_size=0.1, random_state=2018)
-    train_index, val_index = train_test_split(train_index, test_size=0.1, random_state=2018)
-
-    pad = lambda sequences, maxlen: pad_sequences(tokenizer.texts_to_sequences(sequences), maxlen=maxlen)
-
-    X_train = pad(X_y.loc[train_index].pre.values, pre),\
-            pad(X_y.loc[train_index].word.values, 1),\
-            pad(X_y.loc[train_index].post.values, post)
-
-    y_train = X_y.loc[train_index].label.values
-
-    X_val = pad(X_y.loc[val_index].pre.values, pre),\
-            pad(X_y.loc[val_index].word.values, 1),\
-            pad(X_y.loc[val_index].post.values, post)
-
-    y_val = X_y.loc[val_index].label.values
-
-    X_test = pad(X_y.loc[test_index].pre.values, pre),\
-            pad(X_y.loc[test_index].word.values, 1),\
-            pad(X_y.loc[test_index].post.values, post)
-
-    y_test = X_y.loc[test_index].label.values
-
-    return X_train, y_train, X_val, y_val, X_test, y_test, embedding_matrix
-
 def get_class_weights(labels):
-    neg, pos = np.bincount(labels)
+    neg, pos = np.bincount(labels.astype(np.int64))
     total = neg + pos
     print('Examples:\n    Total: {}\n    Positive: {} ({:.2f}% of total)\n'.format(
         total, pos, 100 * pos / total))
@@ -179,7 +168,7 @@ def get_class_weights(labels):
     return class_weight
 
 
-def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0): 
+def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, return_model = False): 
 
     pre_ids = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
     pre_tok_types = tf.keras.layers.Input((pre_length,), dtype=tf.int32)
@@ -197,16 +186,17 @@ def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, 
     pre_embedded = bert_model(pre_ids, attention_mask=pre_attn_mask, token_type_ids=pre_tok_types)[0]
     post_embedded = bert_model(post_ids, attention_mask=post_attn_mask, token_type_ids=post_tok_types)[0]
     
-    pre_embedded = tf.keras.layers.GlobalAveragePooling1D()(pre_embedded)
-    post_embedded = tf.keras.layers.GlobalAveragePooling1D()(post_embedded)
-    
-    merged = tf.keras.layers.concatenate([pre_embedded, post_embedded], axis=1)
-    
     input_length = pre_length + post_length
     model_scale = hparams['model_scale']
 
-    # layer =  layers.Bidirectional(layers.LSTM(input_length*model_scale))(merged)
-    layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(merged)
+    if hparams['lstm']:
+        merged = tf.keras.layers.concatenate([pre_embedded, post_embedded], axis=1)
+        layer =  layers.Bidirectional(layers.LSTM(input_length*model_scale))(merged)
+    else:
+        pre_embedded = tf.keras.layers.GlobalAveragePooling1D()(pre_embedded)
+        post_embedded = tf.keras.layers.GlobalAveragePooling1D()(post_embedded)
+        merged = tf.keras.layers.concatenate([pre_embedded, post_embedded], axis=1)
+        layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(merged)
         
     for _ in range(hparams['n_layers']):
         layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
@@ -243,9 +233,13 @@ def ngram_dual_bert(data, pre_length, post_length, hparams, callbacks, metrics, 
 
     scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
 
-    return scores
+    if return_model:
+        return model
+    else:
+        scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+        return scores
 
-def ngram_glove_lstm(data, pre_length, word_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0):  
+def ngram_glove_lstm(data, pre_length, word_length, post_length, hparams, callbacks, metrics, embedding_matrix = 0, return_model = False):  
 
     pre = tf.keras.Input(shape=(pre_length,), dtype="int64")
     word = tf.keras.Input(shape=(word_length,), dtype="int64")
@@ -306,9 +300,11 @@ def ngram_glove_lstm(data, pre_length, word_length, post_length, hparams, callba
                 callbacks= callbacks,
                 class_weight = class_weight)
 
-    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
-
-    return scores
+    if return_model:
+        return model
+    else:
+        scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+        return scores
 
 # do siamese lstm as class 
 
@@ -362,7 +358,7 @@ def ngram_single_bert(data, input_length, hparams, callbacks, metrics, embedding
 
     return scores
 
-def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0): 
+def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics, loss = 'categorical_crossentropy', embedding_matrix = 0, return_model = False): 
 
     ids = tf.keras.layers.Input((input_length,), dtype=tf.int32)
     tok_types = tf.keras.layers.Input((input_length,), dtype=tf.int32)
@@ -377,7 +373,7 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
     
     model_scale = hparams['model_scale']
 
-    layer =  layers.LSTM(input_length*model_scale)(embedded)
+    layer =  layers.Bidirectional(layers.LSTM(input_length*model_scale))(embedded)
 
     for _ in range(hparams['n_layers']):
         layer = layers.Dense(input_length*hparams['model_scale'], activation=hparams['activation'])(layer)
@@ -404,9 +400,11 @@ def bert_to_mask(data, input_length, output_length, hparams, callbacks, metrics,
               verbose = 1,
               callbacks= callbacks)
 
-    scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
-
-    return scores
+    if return_model:
+        return model
+    else:
+        scores = model.evaluate(data['X_test'], data['y_test'], return_dict = True)
+        return scores
 
 def categorical_bert(data, input_length, output_length, hparams, callbacks, metrics, verbose = 1, loss = 'categorical_crossentropy', embedding_matrix = 0, return_model = False): 
 

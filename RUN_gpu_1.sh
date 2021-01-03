@@ -1,0 +1,9 @@
+# CUDA_VISIBLE_DEVICES=1 python train_categorical.py --method_name end
+# CUDA_VISIBLE_DEVICES=1 python train_categorical.py --method_name start
+# CUDA_VISIBLE_DEVICES=1 python train_categorical.py --method_name spans
+# CUDA_VISIBLE_DEVICES=1 python train_categorical.py --method_name len
+# CUDA_VISIBLE_DEVICES=1 python train_bert_span.py --method_name bert_span
+# CUDA_VISIBLE_DEVICES=1 python train_lstm_ngram.py --method_name lstm_ngram
+# CUDA_VISIBLE_DEVICES=1 python train_bert_ngram.py --method_name bert_ngram --hparams --runs 10
+# CUDA_VISIBLE_DEVICES=1 python train_bert_span.py --method_name bert_span --hparams --runs 10
+CUDA_VISIBLE_DEVICES=1 python train_lstm_ngram.py --method_name lstm_ngram --hparams --runs 10

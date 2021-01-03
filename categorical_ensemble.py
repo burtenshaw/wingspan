@@ -39,6 +39,7 @@ os.chdir('/home/burtenshaw/now/spans_toxic')
 from results import EvalResults
 from utils import *
 from models import *
+import ensemble_features
 
 tf.config.list_physical_devices(device_type='GPU')
 
@@ -56,78 +57,17 @@ predict word label based on :
 
 MAX_LEN = 128
 
-# embeddings
-ibm = pd.read_pickle('data/predictions/TRAIN_IBM_TOX.bin')
-glove = pd.read_pickle('data/predictions/glove.bin')
-sentence_bert = pd.read_pickle('data/predictions/sentence_bert.bin')
-spacy_vectors = pd.read_pickle('data/predictions/spacy_vectors.bin')
-spacy_sentiment = pd.read_pickle('data/predictions/spacy_sentiment.bin')
+# features
 
-# baselines
-lex = pd.read_pickle('data/predictions/lexical_pred.bin')
-spacy_baseline = pd.read_pickle('data/predictions/spacy_baseline.bin')
+folds_dir_list = ['0', '1', '2', '3', '4']
 
-# categorical
-start = pd.read_pickle('data/predictions/start.bin') 
-end = pd.read_pickle('data/predictions/end.bin') 
-n_span = pd.read_pickle('data/predictions/n_span.bin') 
-len_ = pd.read_pickle('data/predictions/len_.bin') 
+X, y = ensemble_features.all_ensemble_features(folds_dir_list)
 
-# word models
-ngram_bert = pd.read_pickle('data/predictions/ngram_bert.bin')
-ngram_glove_lstm = pd.read_pickle('data/predictions/ngram_glove_lstm.bin')
-
-# span models
-span_bert = pd.read_pickle('data/predictions/span_bert.bin') 
-
-#%% GROUP word level PREDICTIONS to sentence level models
-ngram_bert = ngram_bert.groupby(level=0).pred.apply(np.array).apply(pad_mask, max_len =MAX_LEN)
-ngram_glove_lstm = ngram_glove_lstm.groupby(level=0).pred.apply(np.array).apply(pad_mask, max_len =MAX_LEN)
-
-#%% align all indicies
-lex = lex[['sentence_pred','lexical','label']].loc[muse.index.drop_duplicates()].rename(columns={'lexical':'pred'})
-# Horizontally 
-# df = pd.concat([muse,lex], axis= 1, keys = ['muse', 'lex'])
-
-word_level = [
-    glove,
-    sentence_bert,
-    spacy_vectors,
-    spacy_sentiment,
-    lex,
-    spacy_baseline,
-    start,
-    end,
-    ngram_bert,
-    ngram_glove_lstm,
-    span_bert,
-]
-
-sentence_level = [
-    ibm,
-    len_,
-    n_span,
-]
-
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 #%%
 
-X_word = np.hstack([np.vstack(word_predictions) for word_predictions in word_level])
-X_sentence = np.hstack(sentence_level)
-
-X = np.hstack(X_word, X_sentence)
-y = pd.read_pickle('data/data.bin')['word_mask']
-
-X_train, y_train, X_test, y_test = train_test_split(X, y, test_size=0.3, random_state=2018)
-
-# %% RANDO FOREST
-clf = RandomForestClassifier(max_depth=40, random_state=0)
-clf.fit(X_train, y_train)
-print(clf.score(X_test, y_test))
-ensemble_y_pred = clf.predict_proba(X_test)
-#%%
-
-def ngram_glove_lstm(data, word_seq_len, sentence_seq_len, hparams, callbacks, metrics):  
+def ensemble_lstm(data, word_seq_len, sentence_seq_len, hparams, callbacks, metrics):  
 
     word = tf.keras.Input(shape=(word_seq_len,), dtype="int64")
     sentence = tf.keras.Input(shape=(sentence_seq_len,), dtype="int64")
@@ -259,13 +199,13 @@ while now < tomorrow:
 
 
 
-results_df = df.loc[test_index]
-results_df['ensemble', 'pred'] = np.amax(ensemble_y_pred, -1)
-_data = pd.read_pickle("data/train.bin").loc[test_index]
+# results_df = df.loc[test_index]
+# results_df['ensemble', 'pred'] = np.amax(ensemble_y_pred, -1)
+# _data = pd.read_pickle("data/train.bin").loc[test_index]
 
-component_models = [('muse', 0.5), ('lex', 0), ('ensemble', 0.01)]
+# component_models = [('muse', 0.5), ('lex', 0), ('ensemble', 0.01)]
 
-r = EvalResults(component_models, results_df , params = {'muse' : {'lr' : 0, 'activation' : 'relu'}})
-r.rdf# %%
+# r = EvalResults(component_models, results_df , params = {'muse' : {'lr' : 0, 'activation' : 'relu'}})
+# r.rdf# %%
 
-# %%
+# # %%
