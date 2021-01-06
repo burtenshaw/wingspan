@@ -46,13 +46,15 @@ def spacy_ents_to_word_mask(doc):
           word_mask[word_idx] = 1
   return word_mask
   
-def spacy_word_mask_to_spans(row, field = 'word_mask'):
+def spacy_word_mask_to_spans(row, field = 'word_mask', maxlen = 128):
     doc = nlp(row.text)
     word_mask = row[field]
     pred_spans = []
     last = 0
 
     for token in doc:
+        if token.i == maxlen:
+            break
         if word_mask[token.i] == 1:
             start = token.idx
             end = token.idx + len(token)

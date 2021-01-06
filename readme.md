@@ -13,16 +13,16 @@
 - [ ] try electra on mask prediction
 
 ## categorical sub-tasks
-- [ ] add multilabel as embedding
+- [x] add multilabel as embedding
 - [x] predicted n_spans, 
 - [x] predicted multilabel toxicity, 
 - [x] predict span start,
 - [x] predicted span end,
 - [x] predicted span length
-- [ ] spacy vectors 
-- [ ] spacy word sentiment 
-- [ ] glove word embeddings
-- [ ] sentence bert
+- [x] spacy vectors 
+- [x] spacy word sentiment 
+- [x] glove word embeddings
+- [x] sentence bert
 - [ ] train an ensemble model using numerical data
 
 ## Postprocessing
@@ -31,7 +31,7 @@
 
 ## Cross validation_data
 
-- [ ] 5 fold cross validation
+- [x] 5 fold cross validation
 
 # Current Methods :
 
@@ -54,11 +54,12 @@
 - as above using bert
 - under performing on shorter ngrams
 - trying on longer ngrams
+  overfitting - redone hparams optimisation 
 
 ## mask_bert
 
 - predict the word toxicity given a sentence of a sentence given, use token type_ids to mark the target word
-- flawed 
+- flawed - redo with ne mask for each word to predict
 
 ## span_bert
 
@@ -77,6 +78,7 @@
 
 - predict number of spans [ to be ensembled with other numerical tasks]
 - ~ 0.97 on nspan prediction
+- overfitting on 1 - add class weights
 
 ## predict span start
 

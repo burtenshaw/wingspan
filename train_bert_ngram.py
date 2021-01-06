@@ -97,7 +97,7 @@ for fold in folds_list:
                     hp.HParam('batch_size', hp.Discrete([16])),
                     hp.HParam('lr', hp.Discrete([1e-3, 1e-5, 1e-7, 1e-9])),
                     hp.HParam('dropout',hp.Discrete([0.2])),
-                    hp.HParam('n_layers', hp.Discrete([1,2,3])),
+                    hp.HParam('n_layers', hp.Discrete([1,2])),
                     hp.HParam('model_scale',hp.Discrete([1,2,3])),
                     hp.HParam('pre', hp.Discrete([64])),
                     hp.HParam('post', hp.Discrete([64])),
@@ -117,6 +117,7 @@ for fold in folds_list:
             param_str = '%s_run_%s' % (METHOD_NAME, runs)
             run_dir = LOG_DIR + '/' + fold + param_str
             hparams = {hp.name : hp.domain.sample_uniform() for hp in HPARAMS}
+            callbacks.append(hp.KerasCallback(LOG_DIR, hparams))
 
             for k, v in hparams.items():
                 print('\t|%s = %s' % (k, v))
@@ -133,9 +134,6 @@ for fold in folds_list:
                             'y_val' : y_val, 
                             'X_test' : X_test, 
                             'y_test' : y_test}
-
-
-            callbacks.append(hp.KerasCallback(run_dir, hparams))
 
             with tf.summary.create_file_writer(run_dir).as_default():
                 hp.hparams(hparams)  # record the values used in this trial

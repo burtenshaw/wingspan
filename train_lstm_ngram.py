@@ -107,6 +107,7 @@ for fold in folds_list:
     ]
 
     callbacks = [TensorBoard(log_dir=LOG_DIR, histogram_freq=1)]
+
     if args.hparams:
         HPARAMS = [
                     hp.HParam('activation', hp.Discrete(['relu'])),
@@ -134,9 +135,9 @@ for fold in folds_list:
 
             if args.hparams:
 
-                # callbacks.append(hp.KerasCallback(run_dir, hparams))
 
                 hparams = {hp.name : hp.domain.sample_uniform() for hp in HPARAMS}
+                callbacks.append(hp.KerasCallback(run_dir, hparams))
                 
                 X_train, y_train, _ = make_context_data(train, 
                                                     pre = hparams['pre'], 

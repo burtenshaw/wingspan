@@ -111,6 +111,7 @@ for fold in folds_list:
                 hp.HParam('epochs', hp.Discrete([5])),
                 ]
 
+        
         with tf.summary.create_file_writer(LOG_DIR).as_default():
             hp.hparams_config(
                 hparams=HPARAMS,
@@ -124,7 +125,7 @@ for fold in folds_list:
             run_dir = LOG_DIR + '/' + param_str
 
             hparams = {hp.name : hp.domain.sample_uniform() for hp in HPARAMS}
-            # callbacks.append([hp.KerasCallback(run_dir, hparams)])
+            callbacks.append(hp.KerasCallback(LOG_DIR, hparams))
 
             with tf.summary.create_file_writer(run_dir).as_default():
                 hp.hparams(hparams)  # record the values used in this trial
