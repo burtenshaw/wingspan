@@ -903,9 +903,9 @@ class TokenBert:
         self.y_val  = np.dstack(self.val.apply(self.make_target_labels, axis=1).values).T
         self.y_test  = np.dstack(self.test.apply(self.make_target_labels, axis=1).values).T
 
-        self.X_train.append(self.get_class_weights(self.y_train).astype(float))
-        self.X_val.append(self.get_class_weights(self.y_val).astype(float))
-        self.X_test.append(self.get_class_weights(self.y_test).astype(float))
+        # self.X_train.append(self.get_class_weights(self.y_train).astype(float))
+        # self.X_val.append(self.get_class_weights(self.y_val).astype(float))
+        # self.X_test.append(self.get_class_weights(self.y_test).astype(float))
 
         return None
 
@@ -947,21 +947,20 @@ class TokenBert:
         ids = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
         tok_types = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
         attn_mask = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
-        class_weights = tf.keras.layers.Input((self.maxlen,), dtype=tf.float32)
+        # class_weights = tf.keras.layers.Input((self.maxlen,), dtype=tf.float32)
         
         bert_model = TFBertForTokenClassification.from_pretrained('bert-base-cased', num_labels=3)
         layer = bert_model([ids,attn_mask,tok_types])[0]
 
         # lstm = layers.Bidirectional(layers.LSTM(self.maxlen))(layer)
-        weights = tf.expand_dims(tf.square(class_weights), axis = -1)
-        weights = tf.repeat(weights, repeats = 3, axis = 2)
-        layer = layers.Multiply()([layer, weights])
+        # weights = tf.expand_dims(tf.square(class_weights), axis = -1)
+        # weights = tf.repeat(weights, repeats = 3, axis = 2)
+        # layer = layers.Multiply()([layer, weights])
         out = layers.Dense(3, activation='softmax')(layer) 
 
         model = tf.keras.Model( inputs=[ids, 
                                         tok_types, 
-                                        attn_mask,
-                                        class_weights], 
+                                        attn_mask], 
                                 outputs=out)
 
         model.summary()
