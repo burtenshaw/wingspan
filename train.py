@@ -43,7 +43,7 @@ else:
 
 # from results import EvalResults
 from utils import *
-from models import *
+# from models import *
 import config
 
 tf.config.list_physical_devices(device_type='GPU')
@@ -75,7 +75,7 @@ for fold in folds_list:
     print('test : ', test.shape)
     
     method = config.METHODS[METHOD_NAME]
-    method = method(train, val, test)
+    method = method(train, val, test, method_name = METHOD_NAME)
 
     callbacks = [TensorBoard(log_dir=LOG_DIR, histogram_freq=1)]
 

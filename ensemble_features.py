@@ -11,7 +11,7 @@ from sklearn.metrics import classification_report, roc_curve
 from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler
 from sklearn.model_selection import train_test_split
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from sentence_transformers import SentenceTransformer, util
+# from sentence_transformers import SentenceTransformer, util
 import spacy
 
 #%%

@@ -1,10 +1,10 @@
 import numpy as np
 from string import punctuation
-from models import bert_prep
+# from models import bert_prep
 from sklearn.model_selection import train_test_split
 import itertools
 
-from tensorflow.keras.utils import to_categorical
+# from tensorflow.keras.utils import to_categorical
 
 import spacy
 from spacy.tokens import Span
@@ -64,9 +64,6 @@ def spacy_word_mask_to_spans(row, field = 'word_mask', maxlen = 128):
         last = word_mask[token.i]
     
     return pred_spans
-
-
-
 
 
 def word_mask_to_character_entity(row, field = 'word_mask', result_shape=200, pad = True):

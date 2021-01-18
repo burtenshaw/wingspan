@@ -8,6 +8,10 @@ import os
 import pandas as pd
 import sklearn
 import spacy
+from spacy.tokens import Doc
+from ast import literal_eval
+
+from spacy.util import decaying
 
 from IPython import get_ipython
 
@@ -43,20 +47,12 @@ def spans_to_ents(doc, spans, label):
     ents.append((left, right, label))
   return ents
 
-
-def main(train, test):
+def main(training_data, test):
   """Train and eval a spacy named entity tagger for toxic spans."""
-
+  spacy.prefer_gpu()
+  nlp = spacy.load("en_core_web_lg")
+  dropout = decaying(0.6, 0.2, 1e-4)  
   # Convert training data to Spacy Entities
-  nlp = spacy.load("en_core_web_sm")
-
-  print('preparing training data')
-  training_data = []
-  for n, (spans, text) in enumerate(train):
-    doc = nlp(text)
-    ents = spans_to_ents(doc, set(spans), 'TOXIC')
-    training_data.append((doc.text, {'entities': ents}))
-
   toxic_tagging = spacy.blank('en')
   toxic_tagging.vocab.strings.add('TOXIC')
   ner = nlp.create_pipe("ner")
@@ -71,6 +67,7 @@ def main(train, test):
   print('training')
   with toxic_tagging.disable_pipes(*unaffected_pipes):
     toxic_tagging.begin_training()
+
     for iteration in range(30):
       random.shuffle(training_data)
       losses = {}
@@ -79,30 +76,60 @@ def main(train, test):
               4.0, 32.0, 1.001))
       for batch in batches:
         texts, annotations = zip(*batch)
-        toxic_tagging.update(texts, annotations, drop=0.5, losses=losses)
+        toxic_tagging.update(texts, annotations, drop=next(dropout), losses=losses)
       print("Losses", losses)
 
-  # Score on trial data.
-  print('evaluation')
-  scores = []
-  for spans, text in test:
+  eval_predict = []
+  for text in test:
     pred_spans = []
     doc = toxic_tagging(text)
     for ent in doc.ents:
       pred_spans.extend(range(ent.start_char, ent.start_char + len(ent.text)))
-    score = semeval2021.f1(pred_spans, spans)
-    scores.append(score)
-  print('avg F1 %g' % statistics.mean(scores))
-
+    eval_predict.append(pred_spans)
+  
+  return eval_predict
 #%%
+# hate = pd.read_json('data/hate_dataset_parsed.json')[['tokens','entities']]
+# train = pd.read_csv('data/train.csv')[['text', 'spans']]
+# train['spans'] = train.spans.apply(literal_eval)
+# val = pd.read_csv('data/val.csv')[['text', 'spans']]
+# val['spans'] = val.spans.apply(literal_eval)
+# test = pd.read_csv('data/test.csv')[['text', 'spans']]
+# test['spans'] = test.spans.apply(literal_eval)
+
+# train = pd.concat([train,val,test[:-100]], axis=0)
+# test = test[-100:]
+
+# train.to_json('data/spacy_train.json')
+# train.to_json('data/spacy_test.json')
+# #%%
 
 def read_datafile(df):
     df['fixed'] = df.apply(lambda row : fix_spans.fix_spans(row['spans'], row['text']), axis = 1)
     return df[['fixed', 'text']].apply(tuple, axis = 1).to_list()
+# train = read_datafile(train)
+# test = read_datafile(test)
+# print('preparing training data')
+# training_data = []
+# nlp = spacy.load('en_core_web_sm', disable=['ner', 'parser'])
+# for n, (spans, text) in enumerate(train):
+#   doc = nlp(text)
+#   ents = spans_to_ents(doc, set(spans), 'TOXIC')
+#   training_data.append((doc.text, {'entities': ents}))
+# #%%
+# print('adding hate data')
 
-train = read_datafile(pd.read_pickle('data/train.bin')[['text', 'spans']])
-test = read_datafile(pd.read_pickle('data/test.bin')[['text', 'spans']])
+# def make_hate_tuple(row):
+#   doc = Doc(nlp.vocab, words = row.tokens)
+#   return (doc.text, {'entities': row.entities})
 
-main(train, test)
+# hate_list = hate.apply(make_hate_tuple, axis=1).to_list()
+# #%%
+# training_data.extend(hate_list)
+# #%%
+# eval_set = pd.read_pickle('data/eval.bin').text.to_list()
+# eval_predict = main(training_data, test, eval_set)
+# # %%
+# eval_predict.to_csv('predictions/baseline_2 .csv')
 
-# %%
+

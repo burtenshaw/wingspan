@@ -1,7 +1,11 @@
+#%%
+
 import pandas as pd
 import numpy as np
 from sklearn.metrics import f1_score, precision_recall_fscore_support, classification_report, roc_curve
 import tensorflow as tf
+import os
+os.chdir('/home/burtenshaw/now/spans_toxic')
 from utils import *
 
 
@@ -89,3 +93,83 @@ def train_accuracy(y_true, y_pred):
     score = f1(list(y_pred), list(y_true))
 
     return score
+
+def do_task_f1(text_list, true_spans, pred_masks):
+    
+    df = pd.DataFrame()
+    df['text'] = text_list
+    df['spans'] = true_spans
+    df['pred_mask'] = pred_masks
+    df['pred_spans'] = df.apply(spacy_word_mask_to_spans, field = 'pred_mask', axis = 1)
+    df['f1_score'] = df.apply(lambda row : f1(row.pred_spans, row.spans), axis = 1)
+
+    return df.f1_score.mean()
+
+
+# # %%
+# BASE_DIR = '/home/burtenshaw/now/spans_toxic'
+# method_name = 'LSTM_NGRAM'
+# # method_name = 'BERT_NGRAM'
+# # method_name = 'BERT_SPAN'
+# text_series = pd.Series()
+# pred_series = pd.Series()
+# true_series = pd.Series()
+# folds_dir_list = ['0', '1', '2', '3', '4']
+# for fold in folds_dir_list:
+#     pred_dir = os.path.join(BASE_DIR, 'predictions', fold)
+#     data_dir = os.path.join(BASE_DIR, 'data', fold)
+#     test_df = pd.read_pickle(os.path.join(data_dir, "test.bin"))
+#     pred_df = pd.read_pickle(os.path.join(pred_dir, "%s.bin" % method_name.lower()))
+#     text_series = pd.concat([text_series, test_df.text], axis = 0)
+#     pred_series = pd.concat([pred_series, pred_df[0]], axis = 0)
+#     true_series = pd.concat([true_series, test_df.spans], axis = 0)
+
+
+# df = pd.DataFrame()
+# df['text'] = text_series
+# df['spans'] = true_series
+# df['pred_mask'] = pred_series.groupby(level = 0).apply(np.array)
+# #%%
+# df.pred_mask = df.pred_mask.apply(lambda x : np.where(x > 0.5, 1,0))
+# df['pred_spans'] = df.apply(spacy_word_mask_to_spans, field = 'pred_mask', axis = 1)
+# df['f1_score'] = df.apply(lambda row : f1(row.pred_spans, row.spans), axis = 1)
+
+# df.f1_score.mean()
+
+# # %%
+# method_name = 'BERT_SPAN'
+
+# text_series = pd.Series()
+# pred_series = pd.Series()
+# true_series = pd.Series()
+# folds_dir_list = ['0', '1', '2', '3', '4']
+# for fold in folds_dir_list:
+#     pred_dir = os.path.join(BASE_DIR, 'predictions', fold)
+#     data_dir = os.path.join(BASE_DIR, 'data', fold)
+#     test_df = pd.read_pickle(os.path.join(data_dir, "test.bin"))
+#     pred_df = pd.read_pickle(os.path.join(pred_dir, "%s.bin" % method_name.lower()))
+#     text_series = pd.concat([text_series, test_df.text], axis = 0)
+#     pred_series = pd.concat([pred_series, pred_df], axis = 0)
+#     true_series = pd.concat([true_series, test_df.spans], axis = 0)
+
+# #%%
+# # scaler
+
+# from sklearn.preprocessing import MinMaxScaler
+# scaler = MinMaxScaler()
+# scaler.fit(pred_series.values)
+
+
+
+# #%%
+# df = pd.DataFrame()
+# df['text'] = text_series
+# df['spans'] = true_series
+# df['pred_mask'] = list(scaler.transform(pred_series.values))
+# #%%
+# df['pred_spans'] = df.apply(spacy_word_mask_to_spans, field = 'pred_mask', axis = 1)
+# df['f1_score'] = df.apply(lambda row : f1(row.pred_spans, row.spans), axis = 1)
+
+# df.f1_score.mean()
+
+# # %%
