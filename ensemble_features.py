@@ -179,3 +179,6 @@ def get_data(folds_dir_list, limit = None, test_text = False):
         return X_train, y_train, X_test, y_test
 
 # %%
+
+
+

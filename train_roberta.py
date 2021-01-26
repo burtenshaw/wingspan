@@ -25,10 +25,10 @@ if get_ipython().__class__.__name__ == 'ZMQInteractiveShell':
     mgc(u'%load_ext tensorboard')
     mgc(u'%load_ext autoreload')
     mgc(u'%autoreload 2')
-    METHOD_NAME = 'ELECTRA'
+    METHOD_NAME = 'ROBERTA'
     LOG_DIR = "logs/" + METHOD_NAME
     os.chdir('/home/burtenshaw/now/spans_toxic')
-    os.environ["CUDA_VISIBLE_DEVICES"]="3"
+    os.environ["CUDA_VISIBLE_DEVICES"]="2"
 else:
     parser = argparse.ArgumentParser()
     parser.add_argument("--method_name")
@@ -51,8 +51,8 @@ fold = 'all'
 data_dir = os.path.join('/home/burtenshaw/now/spans_toxic/data', fold)
 output_dir = os.path.join('/home/burtenshaw/now/spans_toxic/predictions', fold)
 save_path = os.path.join(output_dir, '%s.json' % (METHOD_NAME))
-word_ids_path = os.path.join(output_dir, '%s.bin' % (METHOD_NAME + '_word_ids'))
-model_path = os.path.join(output_dir, '%s.bin' % (METHOD_NAME + '_model'))
+word_ids_path = os.path.join(output_dir, '%s.bin' % ('token_bert' + '_word_ids'))
+model_path = os.path.join(output_dir, '%s.bin' % ('token_bert' + '_model'))
 
 #%%
 LOG_DIR = "logs/%s/%s/" % (METHOD_NAME, fold)
@@ -70,39 +70,33 @@ train.drop(columns = ['baseline_word_mask'], inplace = True)
 val.drop(columns = ['baseline_word_mask'], inplace = True)
 test.drop(columns = ['baseline_word_mask'], inplace = True)
 
+# eval_ = pd.read_pickle(os.path.join(data_dir, "eval.bin"))
+
+
+# with open('data/hate_dataset.json', 'r') as f:
+#     data = json.load(f)
+
+# hate = pd.DataFrame(data).T[['post_tokens', 'rationales']]\
+#     .explode('rationales').reset_index().dropna().drop(columns=['index'])\
+#         .rename(columns = {'post_tokens' : 'tokens' , 'rationales' : 'word_mask'})
+
+# hate['text']= hate.tokens.apply(lambda x : ' '.join(x)) 
+
+# train = pd.concat([train,val,hate])
+# val = test[:800]
+# test = test[800:]
+
 print('train : ', train.shape)
 print('val : ', val.shape)
 print('test : ', test.shape)
 
 from tensorflow.keras import layers
-from transformers import TFElectraForTokenClassification, ElectraTokenizerFast
 from tensorflow.keras.optimizers import Adam
+import transformers
 
-class TokenBert(models.TokenBert    ):
+from transformers import RobertaTokenizerFast, TFRobertaForTokenClassification
 
-
-    
-    def bert_prep(self, tokens, max_len=128):
-
-        input_ids = []
-        token_type_ids = []
-        attn_mask = []
-        word_ids = []
-
-        for i in tqdm(range(len(tokens))):
-            encoding = self.tokenizer(tokens[i], 
-                                max_length = max_len, 
-                                truncation=True,
-                                is_split_into_words=True,
-                                padding='max_length',
-                                )
-            
-            input_ids.append(encoding["input_ids"])
-            token_type_ids.append(encoding['token_type_ids'])
-            attn_mask.append(encoding["attention_mask"])
-            word_ids.append(encoding.word_ids())
-            
-        return input_ids, token_type_ids, attn_mask, word_ids
+class Roberta(models.Roberta):
 
 
     def run(self, data, return_model = False): 
@@ -110,10 +104,13 @@ class TokenBert(models.TokenBert    ):
         hp = self.hparams
         
         ids = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
-        tok_types = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
+        # tok_types = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
         attn_mask = tf.keras.layers.Input((self.maxlen,), dtype=tf.int32)
-        
-        layer = self.model([ids,attn_mask,tok_types])[0]
+    
+        layer = self.bert_model(input_ids = ids,
+                                attention_mask = attn_mask,
+                                # token_type_ids = tok_types
+                                )[0]
 
         for n in range(hp['n_layers']):
             layer = layers.Dense(hp['nodes'][n])(layer)
@@ -122,14 +119,16 @@ class TokenBert(models.TokenBert    ):
         out = layers.Dense(3, activation='softmax')(layer) 
 
         model = tf.keras.Model( inputs=[ids, 
-                                        tok_types, 
+                                        # tok_types, 
                                         attn_mask,
                                         # class_weights
                                         ], 
                                 outputs=out)
 
+        
+
         model.summary()
-        # loss = tf.keras.losses.SparseCategoricalCrossentropy()
+
         opt = Adam(lr = hp['lr'])
         model.compile(optimizer = opt, 
                     loss = 'categorical_crossentropy', 
@@ -145,7 +144,7 @@ class TokenBert(models.TokenBert    ):
                     verbose = 1,
                     callbacks= self.callbacks,
                     sample_weight = self.train_weights)
-
+                    
         self.y_pred = model.predict(self.X_test)
         task_score = self.task_results(self.y_test, self.y_pred)
 
@@ -156,21 +155,21 @@ class TokenBert(models.TokenBert    ):
             scores['task_f1'] = task_score
             return scores
 
-
 #%%
 
-method = TokenBert
+method = Roberta
 callbacks = [TensorBoard(log_dir=LOG_DIR, histogram_freq=1)]
+
 
 hparams = { 
             'activation' : 'relu',
             'batch_size' : 8,
             'lr' : 0.00001,
-            'dropout' : 0.1,
+            'dropout' : 0.2,
             'n_layers' : 3,
-            'epochs' : 4, 
+            'epochs' : 2, 
             'neg_weight' : 1.0,
-            'pos_weight' : 2.0,
+            'pos_weight' : 1.2,
             'pad_weight' : 1.0,
             'nodes' : [12,6,3]
         }
@@ -179,34 +178,20 @@ method = method(train, val, test)
 method.callbacks = callbacks
 method.hparams = hparams
 
+
 train_samples = method.get_data()
 model = method.run(data = train_samples, return_model = True)
 y_pred = model.predict(method.X_test)
 
 #%%
 
-        'ELECTRA' : [
-                hp.HParam('batch_size', hp.Discrete([8])),
-                hp.HParam('lr', hp.Discrete([0.00001])),
-                hp.HParam('dropout',hp.RealInterval(0.1, 0.4)),
-                hp.HParam('epochs', hp.Discrete([3,4])), 
-                hp.HParam('n_layers', hp.Discrete([2])),
-                hp.HParam('neg_weight', hp.RealInterval(1.0,1.0)),
-                hp.HParam('pos_weight', hp.RealInterval(1.0,1.5)),
-                hp.HParam('pad_weight', hp.RealInterval(0.7,0.7))
-                ],
+from models import to_ensemble
 
-        'ROBERTA' : [
-                hp.HParam('batch_size', hp.Discrete([8])),
-                hp.HParam('lr', hp.Discrete([0.00001])),
-                hp.HParam('dropout',hp.RealInterval(0.2, 0.2)),
-                hp.HParam('epochs', hp.Discrete([2,3])), 
-                hp.HParam('n_layers', hp.Discrete([3])), 
-                hp.HParam('nodes', hp.Discrete([12])),
-                hp.HParam('neg_weight', hp.RealInterval(1.0,1.0)),
-                hp.HParam('pos_weight', hp.RealInterval(1.0,1.5)),
-                hp.HParam('pad_weight', hp.RealInterval(1.0,1.0))
-                ],
+
+
+
+
+to_ensemble(y_pred, method, save_path)
 
 #%%
 
